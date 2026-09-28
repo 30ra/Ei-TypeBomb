@@ -294,7 +294,7 @@ Ei-TypeBomb/
 8. The player holding the bomb when it explodes loses.
 
 > Playing on a PC is strongly recommended.
-
+> Turning off the word prediction feature is also strongly recommended.
 ## Screenshots
 
 ![Home screen](./docs/screenshots/0.png)
