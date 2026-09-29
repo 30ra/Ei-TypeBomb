@@ -1,6 +1,6 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "cloudflare",
+	"name": "ei-typebomb",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-09-26",
 	"durable_objects": {
