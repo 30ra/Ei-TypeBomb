@@ -45,8 +45,8 @@ function ServerStatus({
                 />
 
                 {health === true
-                    ? connectionLatency !== null
-                        ? `${connectionLatency}ms`
+                    ? rttLatency !== null
+                        ? `${rttLatency}ms`
                         : "正常"
                     : health === false
                       ? "エラー"
