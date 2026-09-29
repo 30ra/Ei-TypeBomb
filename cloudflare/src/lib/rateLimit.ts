@@ -6,6 +6,7 @@ const limits: Record<string, [number, number]> = {
 	'room:leave': [5, 2],
 	'game:start': [2, 1],
 	'auth:response': [3, 0.5],
+	'health:ping': [2, 0.2],
 };
 export function acceptEvent(session: Session, event: string, now = Date.now()): boolean {
 	const limit = Object.hasOwn(limits, event) ? limits[event] : undefined;
