@@ -12,12 +12,10 @@ const HEALTH_REFRESH_INTERVAL_MS = 60_000;
 function ServerStatus({
     name,
     health,
-    connectionLatency,
     rttLatency,
 }: {
     name: string;
     health: boolean | undefined;
-    connectionLatency: number | null;
     rttLatency: number | null;
 }) {
     return (
@@ -205,21 +203,18 @@ export default function ServerHealth() {
             <ServerStatus
                 name="プレイマリサーバー"
                 health={primary.health}
-                connectionLatency={primary.connectionLatency}
                 rttLatency={primary.rttLatency}
             />
 
             <ServerStatus
                 name="セカンダリサーバー"
                 health={secondary.health}
-                connectionLatency={secondary.connectionLatency}
                 rttLatency={secondary.rttLatency}
             />
 
             <ServerStatus
                 name="フォールバックサーバー"
                 health={fallback.health}
-                connectionLatency={fallback.connectionLatency}
                 rttLatency={fallback.rttLatency}
             />
 
