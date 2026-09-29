@@ -1,19 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { io } from "@/lib/room/socket";
 import Shell from "@/components/layout/Shell";
 import { Icon } from "@/components/ui/Icon";
 import Button from "@/components/ui/Button";
 
+const HEALTH_TIMEOUT_MS = 2_000;
+const HEALTH_REFRESH_INTERVAL_MS = 60_000;
+
 function ServerStatus({
     name,
     health,
-    latency,
+    connectionLatency,
+    rttLatency,
 }: {
     name: string;
     health: boolean | undefined;
-    latency: number | null;
+    connectionLatency: number | null;
+    rttLatency: number | null;
 }) {
     return (
         <div
@@ -42,8 +47,12 @@ function ServerStatus({
                 />
 
                 {health === true
-                    ? latency !== null
-                        ? `${latency}ms`
+                    ? rttLatency !== null
+                        ? `${rttLatency}ms RTT${
+                              connectionLatency !== null
+                                  ? ` · ${connectionLatency}ms 接続`
+                                  : ""
+                          }`
                         : "正常"
                     : health === false
                       ? "エラー"
@@ -53,66 +62,112 @@ function ServerStatus({
     );
 }
 
-function useServerHealth(url: string | undefined, timeout: number) {
+function useServerHealth(url: string | undefined) {
     const [health, setHealth] = useState<boolean | undefined>(undefined);
-    const [latency, setLatency] = useState<number | null>(null);
+    const [connectionLatency, setConnectionLatency] = useState<number | null>(
+        null,
+    );
+    const [rttLatency, setRttLatency] = useState<number | null>(null);
+    const activeSocketRef = useRef<ReturnType<typeof io> | null>(null);
+    const checkIdRef = useRef(0);
 
     const checkServer = useCallback(() => {
+        const checkId = ++checkIdRef.current;
+        activeSocketRef.current?.disconnect();
+        activeSocketRef.current = null;
+
         if (!url) {
             setHealth(false);
-            setLatency(null);
+            setConnectionLatency(null);
+            setRttLatency(null);
             return;
         }
 
-        setHealth(undefined);
-        setLatency(null);
-
-        const start = performance.now();
-
+        // Keep the previous result visible while refreshing. Only the initial
+        // check has health === undefined and therefore shows "接続中…".
+        const connectionStartedAt = performance.now();
         const socket = io(url, {
             reconnection: false,
-            timeout,
+            timeout: HEALTH_TIMEOUT_MS,
             autoConnect: true,
         });
+        activeSocketRef.current = socket;
 
-        const handleConnect = () => {
-            const elapsed = Math.round(performance.now() - start);
+        let rttTimer: ReturnType<typeof setTimeout> | null = null;
+        let finished = false;
 
-            setHealth(true);
-            setLatency(elapsed);
+        const finish = (
+            nextHealth: boolean,
+            nextConnectionLatency: number | null,
+            nextRttLatency: number | null,
+        ) => {
+            if (finished || checkId !== checkIdRef.current) return;
+            finished = true;
+            if (rttTimer) clearTimeout(rttTimer);
+
+            setHealth(nextHealth);
+            setConnectionLatency(nextConnectionLatency);
+            setRttLatency(nextRttLatency);
 
             socket.disconnect();
+            if (activeSocketRef.current === socket) {
+                activeSocketRef.current = null;
+            }
+        };
+
+        const handleConnect = () => {
+            if (checkId !== checkIdRef.current) return;
+
+            const nextConnectionLatency = Math.round(
+                performance.now() - connectionStartedAt,
+            );
+            const pingId = crypto.randomUUID();
+            const rttStartedAt = performance.now();
+
+            socket.once("health:pong", (receivedPingId: unknown) => {
+                if (receivedPingId !== pingId) return;
+
+                finish(
+                    true,
+                    nextConnectionLatency,
+                    Math.round(performance.now() - rttStartedAt),
+                );
+            });
+
+            socket.emit("health:ping", pingId);
+            rttTimer = setTimeout(() => {
+                finish(false, null, null);
+            }, HEALTH_TIMEOUT_MS);
         };
 
         const handleConnectError = () => {
-            setHealth(false);
-            setLatency(null);
-
-            socket.disconnect();
+            finish(false, null, null);
         };
 
         socket.once("connect", handleConnect);
         socket.once("connect_error", handleConnectError);
-    }, [url, timeout]);
+    }, [url]);
 
     useEffect(() => {
-        const initialCheck = window.setTimeout(() => {
-            checkServer();
-        }, 0);
-
-        const interval = window.setInterval(() => {
-            checkServer();
-        }, 60_000);
+        const initialCheck = window.setTimeout(checkServer, 0);
+        const interval = window.setInterval(
+            checkServer,
+            HEALTH_REFRESH_INTERVAL_MS,
+        );
 
         return () => {
             window.clearTimeout(initialCheck);
             window.clearInterval(interval);
+            checkIdRef.current++;
+            activeSocketRef.current?.disconnect();
+            activeSocketRef.current = null;
         };
     }, [checkServer]);
 
     return {
         health,
-        latency,
+        connectionLatency,
+        rttLatency,
         checkServer,
     };
 }
@@ -122,9 +177,9 @@ export default function ServerHealth() {
     const secondaryUrl = process.env.NEXT_PUBLIC_SECONDARY_SERVER_URL;
     const fallbackUrl = process.env.NEXT_PUBLIC_FALLBACK_SERVER_URL;
 
-    const primary = useServerHealth(primaryUrl, 4_000);
-    const secondary = useServerHealth(secondaryUrl, 4_000);
-    const fallback = useServerHealth(fallbackUrl, 4_000);
+    const primary = useServerHealth(primaryUrl);
+    const secondary = useServerHealth(secondaryUrl);
+    const fallback = useServerHealth(fallbackUrl);
 
     const handleRefresh = useCallback(() => {
         primary.checkServer();
@@ -141,19 +196,22 @@ export default function ServerHealth() {
             <ServerStatus
                 name="プレイマリサーバー"
                 health={primary.health}
-                latency={primary.latency}
+                connectionLatency={primary.connectionLatency}
+                rttLatency={primary.rttLatency}
             />
 
             <ServerStatus
                 name="セカンダリサーバー"
                 health={secondary.health}
-                latency={secondary.latency}
+                connectionLatency={secondary.connectionLatency}
+                rttLatency={secondary.rttLatency}
             />
 
             <ServerStatus
                 name="フォールバックサーバー"
                 health={fallback.health}
-                latency={fallback.latency}
+                connectionLatency={fallback.connectionLatency}
+                rttLatency={fallback.rttLatency}
             />
 
             <Button
