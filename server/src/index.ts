@@ -129,6 +129,11 @@ io.on("connection", (socket) => {
     logEvent("SERVER", "client connected", { socketId: socket.id });
     socket.emit("auth:request");
 
+    socket.on("health:ping", (pingId: unknown) => {
+        if (typeof pingId !== "string") return;
+        socket.emit("health:pong", pingId);
+    });
+
     const reportError = (
         message: string,
         error: unknown = new Error(message),

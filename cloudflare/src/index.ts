@@ -82,6 +82,10 @@ export class GameRoom extends DurableObject<WorkerEnv> {
 					this.send(ws, 'pong');
 					return;
 				}
+				if (packet.event === 'health:ping') {
+					if (typeof packet.data === 'string') this.send(ws, 'health:pong', packet.data);
+					return;
+				}
 				if (!acceptEvent(session, packet.event)) {
 					ws.serializeAttachment(session);
 					return;
