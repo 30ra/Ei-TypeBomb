@@ -53,7 +53,9 @@ function ServerStatus({
                                   ? ` · ${connectionLatency}ms 接続`
                                   : ""
                           }`
-                        : "正常"
+                        : connectionLatency !== null
+                          ? `${connectionLatency}ms 接続`
+                          : "正常"
                     : health === false
                       ? "エラー"
                       : "接続中…"}
@@ -136,7 +138,10 @@ function useServerHealth(url: string | undefined) {
 
             socket.emit("health:ping", pingId);
             rttTimer = setTimeout(() => {
-                finish(false, null, null);
+                // The WebSocket/Socket.IO connection itself succeeded, so keep
+                // the server healthy even if an older backend does not support
+                // the optional RTT probe yet.
+                finish(true, nextConnectionLatency, null);
             }, HEALTH_TIMEOUT_MS);
         };
 
