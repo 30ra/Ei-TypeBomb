@@ -333,10 +333,7 @@ export default function Clinet({
             clearPrimaryTimer();
             primarySocket.disconnect();
 
-            if (
-                secondaryUrl &&
-                secondaryUrl !== primaryUrl
-            ) {
+            if (secondaryUrl && secondaryUrl !== primaryUrl) {
                 const socket = io(secondaryUrl, {
                     reconnection: false,
                     timeout: SERVER_FAILOVER_TIMEOUT_MS,
