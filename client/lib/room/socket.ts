@@ -11,6 +11,7 @@ type Options = {
   reconnection?: boolean;
   timeout?: number;
   autoConnect?: boolean;
+  forceNew?: boolean;
 };
 
 export class WorkerSocket {

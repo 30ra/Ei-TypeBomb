@@ -10,6 +10,7 @@ const limits = new Map([
     ["room:leave", { capacity: 5, perSecond: 2 }],
     ["game:start", { capacity: 2, perSecond: 1 }],
     ["auth:response", { capacity: 3, perSecond: 0.5 }],
+    ["health:ping", { capacity: 2, perSecond: 0.2 }],
 ]);
 
 // Create once per connection. State is bounded by the configured event names

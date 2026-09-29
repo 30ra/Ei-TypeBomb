@@ -12,12 +12,10 @@ const HEALTH_REFRESH_INTERVAL_MS = 60_000;
 function ServerStatus({
     name,
     health,
-    connectionLatency,
     rttLatency,
 }: {
     name: string;
     health: boolean | undefined;
-    connectionLatency: number | null;
     rttLatency: number | null;
 }) {
     return (
@@ -48,11 +46,7 @@ function ServerStatus({
 
                 {health === true
                     ? rttLatency !== null
-                        ? `${rttLatency}ms RTT${
-                              connectionLatency !== null
-                                  ? ` · ${connectionLatency}ms 接続`
-                                  : ""
-                          }`
+                        ? `${rttLatency}ms`
                         : "正常"
                     : health === false
                       ? "エラー"
@@ -68,11 +62,13 @@ function useServerHealth(url: string | undefined) {
         null,
     );
     const [rttLatency, setRttLatency] = useState<number | null>(null);
+    const [refreshing, setRefreshing] = useState(false);
     const activeSocketRef = useRef<ReturnType<typeof io> | null>(null);
     const checkIdRef = useRef(0);
 
     const checkServer = useCallback(() => {
         const checkId = ++checkIdRef.current;
+        setRefreshing(true);
         activeSocketRef.current?.disconnect();
         activeSocketRef.current = null;
 
@@ -80,6 +76,7 @@ function useServerHealth(url: string | undefined) {
             setHealth(false);
             setConnectionLatency(null);
             setRttLatency(null);
+            setRefreshing(false);
             return;
         }
 
@@ -90,6 +87,7 @@ function useServerHealth(url: string | undefined) {
             reconnection: false,
             timeout: HEALTH_TIMEOUT_MS,
             autoConnect: true,
+            forceNew: true,
         });
         activeSocketRef.current = socket;
 
@@ -108,6 +106,7 @@ function useServerHealth(url: string | undefined) {
             setHealth(nextHealth);
             setConnectionLatency(nextConnectionLatency);
             setRttLatency(nextRttLatency);
+            setRefreshing(false);
 
             socket.disconnect();
             if (activeSocketRef.current === socket) {
@@ -136,7 +135,7 @@ function useServerHealth(url: string | undefined) {
 
             socket.emit("health:ping", pingId);
             rttTimer = setTimeout(() => {
-                finish(false, null, null);
+                finish(true, nextConnectionLatency, null);
             }, HEALTH_TIMEOUT_MS);
         };
 
@@ -168,6 +167,7 @@ function useServerHealth(url: string | undefined) {
         health,
         connectionLatency,
         rttLatency,
+        refreshing,
         checkServer,
     };
 }
@@ -181,42 +181,47 @@ export default function ServerHealth() {
     const secondary = useServerHealth(secondaryUrl);
     const fallback = useServerHealth(fallbackUrl);
 
+    const refreshing =
+        primary.refreshing || secondary.refreshing || fallback.refreshing;
+
     const handleRefresh = useCallback(() => {
         primary.checkServer();
         secondary.checkServer();
         fallback.checkServer();
-    }, [
-        primary.checkServer,
-        secondary.checkServer,
-        fallback.checkServer,
-    ]);
+    }, [primary.checkServer, secondary.checkServer, fallback.checkServer]);
 
     return (
-        <Shell title="サーバーの状況" size="small">
+        <Shell
+            title="サーバーの状況"
+            size="small"
+            loading={
+                primary.health === undefined &&
+                secondary.health === undefined &&
+                fallback.health === undefined
+            }
+        >
             <ServerStatus
                 name="プレイマリサーバー"
                 health={primary.health}
-                connectionLatency={primary.connectionLatency}
                 rttLatency={primary.rttLatency}
             />
 
             <ServerStatus
                 name="セカンダリサーバー"
                 health={secondary.health}
-                connectionLatency={secondary.connectionLatency}
                 rttLatency={secondary.rttLatency}
             />
 
             <ServerStatus
                 name="フォールバックサーバー"
                 health={fallback.health}
-                connectionLatency={fallback.connectionLatency}
                 rttLatency={fallback.rttLatency}
             />
 
             <Button
                 iconName="rotateCw"
                 onClick={handleRefresh}
+                loading={refreshing}
                 className="w-full"
             >
                 更新

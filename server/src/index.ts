@@ -130,7 +130,13 @@ io.on("connection", (socket) => {
     socket.emit("auth:request");
 
     socket.on("health:ping", (pingId: unknown) => {
-        if (typeof pingId !== "string") return;
+        if (
+            typeof pingId !== "string" ||
+            !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+                pingId,
+            )
+        )
+            return;
         socket.emit("health:pong", pingId);
     });
 
