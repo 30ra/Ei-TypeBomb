@@ -316,6 +316,7 @@ export default function TypingView({
                                 }, 300);
                             }}
                             className="absolute inset-0 w-full h-full opacity-[0.01] z-10"
+                            autoComplete="off"
                             autoCapitalize="off"
                             autoCorrect="off"
                             spellCheck={false}
