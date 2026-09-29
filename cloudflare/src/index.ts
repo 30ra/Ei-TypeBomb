@@ -82,15 +82,19 @@ export class GameRoom extends DurableObject<WorkerEnv> {
 					this.send(ws, 'pong');
 					return;
 				}
-				if (packet.event === 'health:ping') {
-					if (typeof packet.data === 'string') this.send(ws, 'health:pong', packet.data);
-					return;
-				}
 				if (!acceptEvent(session, packet.event)) {
 					ws.serializeAttachment(session);
 					return;
 				}
 				ws.serializeAttachment(session);
+				if (packet.event === 'health:ping') {
+					if (
+						typeof packet.data === 'string' &&
+						/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(packet.data)
+					)
+						this.send(ws, 'health:pong', packet.data);
+					return;
+				}
 				if (packet.event === 'auth:response') {
 					const id = await verifyToken(packet.data?.jwtToken, this.env.JWT_SECRET);
 					if (!id || id !== session.roomId) throw new ClientError('認証トークンが無効または有効期限切れです。ルームに入り直してください。');
