@@ -78,34 +78,38 @@ export default function Clinet({
 
         // SOCKET
         const primaryUrl = resolveServerUrl();
-        const backupUrl = process.env.NEXT_PUBLIC_BACKUP_SERVER_URL;
+        const secondaryUrl = process.env.NEXT_PUBLIC_SECONDARY_SERVER_URL;
+        const fallbackUrl = process.env.NEXT_PUBLIC_FALLBACK_SERVER_URL;
 
         let selected = false;
-        let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
-        let backupConnectionStartedAt: number | null = null;
+        let failoverStarted = false;
+        let secondaryUnavailable = false;
+        let primaryTimer: ReturnType<typeof setTimeout> | null = null;
+        let secondaryTimer: ReturnType<typeof setTimeout> | null = null;
 
-        const primarySocket = io(primaryUrl, {
-            reconnection: false,
-        });
-        const renderSocket =
-            backupUrl && backupUrl !== primaryUrl
-                ? io(backupUrl, { reconnection: false })
-                : null;
-
+        type ServerTier = "primary" | "secondary" | "fallback";
         type Candidate = {
             socket: ReturnType<typeof io>;
             ready: boolean;
             url: string | undefined;
+            tier: ServerTier;
+            startedAt: number;
         };
 
+        const primarySocket = io(primaryUrl, {
+            reconnection: false,
+            timeout: SERVER_FAILOVER_TIMEOUT_MS,
+        });
         const primaryCandidate: Candidate = {
             socket: primarySocket,
             ready: false,
             url: primaryUrl,
+            tier: "primary",
+            startedAt: performance.now(),
         };
-        const renderCandidate: Candidate | null = renderSocket
-            ? { socket: renderSocket, ready: false, url: backupUrl }
-            : null;
+
+        let secondaryCandidate: Candidate | null = null;
+        let fallbackCandidate: Candidate | null = null;
 
         const authenticate = async (candidate: Candidate) => {
             const socket = candidate.socket;
@@ -124,32 +128,59 @@ export default function Clinet({
             });
         };
 
-        const selectCandidate = (candidate: Candidate, isFallback: boolean) => {
+        const clearPrimaryTimer = () => {
+            if (!primaryTimer) return;
+            clearTimeout(primaryTimer);
+            primaryTimer = null;
+        };
+
+        const clearSecondaryTimer = () => {
+            if (!secondaryTimer) return;
+            clearTimeout(secondaryTimer);
+            secondaryTimer = null;
+        };
+
+        const selectCandidate = (candidate: Candidate) => {
             if (selected) return;
 
             selected = true;
-            if (fallbackTimer) {
-                clearTimeout(fallbackTimer);
-                fallbackTimer = null;
-            }
-
+            clearPrimaryTimer();
+            clearSecondaryTimer();
             socketRef.current = candidate.socket;
 
-            const standbySocket =
-                candidate.socket === primaryCandidate.socket
-                    ? renderCandidate?.socket
-                    : primaryCandidate.socket;
-            standbySocket?.disconnect();
+            for (const other of [
+                primaryCandidate,
+                secondaryCandidate,
+                fallbackCandidate,
+            ]) {
+                if (other && other.socket !== candidate.socket) {
+                    other.socket.disconnect();
+                }
+            }
 
-            if (isFallback) {
-                console.warn(
-                    "Primary server unavailable. Switching to Render.",
-                );
-                backupConnectionStartedAt = performance.now();
-                posthog.capture("switched_to_backup_server");
-            } else {
+            const connectionTimeMs = Math.round(
+                performance.now() - candidate.startedAt,
+            );
+
+            if (candidate.tier === "primary") {
                 console.info("Connected to primary server.");
-                posthog.capture("primary_server_connected");
+                posthog.capture("primary_server_connected", {
+                    connection_time_ms: connectionTimeMs,
+                });
+            } else if (candidate.tier === "secondary") {
+                console.warn(
+                    "Primary server unavailable. Switching to secondary server.",
+                );
+                posthog.capture("secondary_server_connected", {
+                    connection_time_ms: connectionTimeMs,
+                });
+            } else {
+                console.warn(
+                    "Primary and secondary servers unavailable. Switching to fallback server.",
+                );
+                posthog.capture("fallback_server_connected", {
+                    connection_time_ms: connectionTimeMs,
+                });
             }
 
             if (candidate.ready) {
@@ -157,8 +188,39 @@ export default function Clinet({
             }
         };
 
+        const maybeSelectFallback = () => {
+            if (
+                selected ||
+                !secondaryUnavailable ||
+                !fallbackCandidate?.ready
+            ) {
+                return;
+            }
+
+            selectCandidate(fallbackCandidate);
+        };
+
+        const markSecondaryUnavailable = () => {
+            if (selected || secondaryUnavailable) return;
+
+            secondaryUnavailable = true;
+            clearSecondaryTimer();
+            secondaryCandidate?.socket.disconnect();
+            maybeSelectFallback();
+        };
+
         const attachSocketListeners = (candidate: Candidate) => {
             const { socket } = candidate;
+
+            socket.on("connect_error", () => {
+                if (selected) return;
+
+                if (candidate.tier === "primary") {
+                    startFailover();
+                } else if (candidate.tier === "secondary") {
+                    markSecondaryUnavailable();
+                }
+            });
 
             socket.on("error", (error: { message?: unknown } | null) => {
                 if (!selected || socketRef.current !== socket) return;
@@ -221,25 +283,17 @@ export default function Clinet({
                 candidate.ready = true;
 
                 if (!selected) {
-                    if (candidate.socket === primaryCandidate.socket) {
-                        selectCandidate(primaryCandidate, false);
+                    if (candidate.tier === "primary") {
+                        selectCandidate(candidate);
+                    } else if (candidate.tier === "secondary") {
+                        selectCandidate(candidate);
+                    } else {
+                        maybeSelectFallback();
                     }
                     return;
                 }
 
                 if (socketRef.current === socket) {
-                    if (
-                        socket === renderSocket &&
-                        backupConnectionStartedAt !== null
-                    ) {
-                        const connectionTimeMs = Math.round(
-                            performance.now() - backupConnectionStartedAt,
-                        );
-                        posthog.capture("backup_server_connected", {
-                            connection_time_ms: connectionTimeMs,
-                        });
-                        backupConnectionStartedAt = null;
-                    }
                     void authenticate(candidate);
                 }
             });
@@ -272,23 +326,73 @@ export default function Clinet({
             );
         };
 
-        attachSocketListeners(primaryCandidate);
-        if (renderCandidate) attachSocketListeners(renderCandidate);
+        const startFailover = () => {
+            if (selected || failoverStarted) return;
 
-        if (renderCandidate) {
-            fallbackTimer = setTimeout(() => {
-                selectCandidate(renderCandidate, true);
-            }, SERVER_FAILOVER_TIMEOUT_MS);
-        } else {
-            fallbackTimer = null;
-        }
+            failoverStarted = true;
+            clearPrimaryTimer();
+            primarySocket.disconnect();
+
+            if (
+                secondaryUrl &&
+                secondaryUrl !== primaryUrl
+            ) {
+                const socket = io(secondaryUrl, {
+                    reconnection: false,
+                    timeout: SERVER_FAILOVER_TIMEOUT_MS,
+                });
+                secondaryCandidate = {
+                    socket,
+                    ready: false,
+                    url: secondaryUrl,
+                    tier: "secondary",
+                    startedAt: performance.now(),
+                };
+                attachSocketListeners(secondaryCandidate);
+            } else {
+                secondaryUnavailable = true;
+            }
+
+            if (
+                fallbackUrl &&
+                fallbackUrl !== primaryUrl &&
+                fallbackUrl !== secondaryUrl
+            ) {
+                const socket = io(fallbackUrl, {
+                    reconnection: false,
+                    timeout: SERVER_FAILOVER_TIMEOUT_MS,
+                });
+                fallbackCandidate = {
+                    socket,
+                    ready: false,
+                    url: fallbackUrl,
+                    tier: "fallback",
+                    startedAt: performance.now(),
+                };
+                attachSocketListeners(fallbackCandidate);
+            }
+
+            if (secondaryCandidate) {
+                secondaryTimer = setTimeout(
+                    markSecondaryUnavailable,
+                    SERVER_FAILOVER_TIMEOUT_MS,
+                );
+            } else {
+                maybeSelectFallback();
+            }
+        };
+
+        attachSocketListeners(primaryCandidate);
+        primaryTimer = setTimeout(startFailover, SERVER_FAILOVER_TIMEOUT_MS);
 
         return () => {
-            if (fallbackTimer) clearTimeout(fallbackTimer);
+            clearPrimaryTimer();
+            clearSecondaryTimer();
             blipAudioRef.current?.pause();
             powerupAudioRef.current?.pause();
-            primarySocket.disconnect();
-            renderSocket?.disconnect();
+            primaryCandidate.socket.disconnect();
+            secondaryCandidate?.socket.disconnect();
+            fallbackCandidate?.socket.disconnect();
         };
     }, [explode]);
 
