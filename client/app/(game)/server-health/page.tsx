@@ -50,11 +50,11 @@ function ServerStatus({
                     ? rttLatency !== null
                         ? `${rttLatency}ms RTT${
                               connectionLatency !== null
-                                  ? ` · ${connectionLatency}ms 接続`
+                                  ? ` · ${connectionLatency}ms`
                                   : ""
                           }`
                         : connectionLatency !== null
-                          ? `${connectionLatency}ms 接続`
+                          ? `${connectionLatency}ms`
                           : "正常"
                     : health === false
                       ? "エラー"
@@ -190,11 +190,7 @@ export default function ServerHealth() {
         primary.checkServer();
         secondary.checkServer();
         fallback.checkServer();
-    }, [
-        primary.checkServer,
-        secondary.checkServer,
-        fallback.checkServer,
-    ]);
+    }, [primary.checkServer, secondary.checkServer, fallback.checkServer]);
 
     return (
         <Shell title="サーバーの状況" size="small">
