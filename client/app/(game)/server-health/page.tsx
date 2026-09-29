@@ -47,15 +47,9 @@ function ServerStatus({
                 />
 
                 {health === true
-                    ? rttLatency !== null
-                        ? `${rttLatency}ms RTT${
-                              connectionLatency !== null
-                                  ? ` · ${connectionLatency}ms`
-                                  : ""
-                          }`
-                        : connectionLatency !== null
-                          ? `${connectionLatency}ms`
-                          : "正常"
+                    ? connectionLatency !== null
+                        ? `${connectionLatency}ms`
+                        : "正常"
                     : health === false
                       ? "エラー"
                       : "接続中…"}
@@ -143,9 +137,6 @@ function useServerHealth(url: string | undefined) {
 
             socket.emit("health:ping", pingId);
             rttTimer = setTimeout(() => {
-                // The WebSocket/Socket.IO connection itself succeeded, so keep
-                // the server healthy even if an older backend does not support
-                // the optional RTT probe yet.
                 finish(true, nextConnectionLatency, null);
             }, HEALTH_TIMEOUT_MS);
         };
@@ -202,7 +193,15 @@ export default function ServerHealth() {
     }, [primary.checkServer, secondary.checkServer, fallback.checkServer]);
 
     return (
-        <Shell title="サーバーの状況" size="small">
+        <Shell
+            title="サーバーの状況"
+            size="small"
+            loading={
+                primary.health === undefined &&
+                secondary.health === undefined &&
+                fallback.health === undefined
+            }
+        >
             <ServerStatus
                 name="プレイマリサーバー"
                 health={primary.health}
@@ -228,7 +227,6 @@ export default function ServerHealth() {
                 iconName="rotateCw"
                 onClick={handleRefresh}
                 loading={refreshing}
-                loadingText="更新中…"
                 className="w-full"
             >
                 更新
