@@ -70,11 +70,13 @@ function useServerHealth(url: string | undefined) {
         null,
     );
     const [rttLatency, setRttLatency] = useState<number | null>(null);
+    const [refreshing, setRefreshing] = useState(false);
     const activeSocketRef = useRef<ReturnType<typeof io> | null>(null);
     const checkIdRef = useRef(0);
 
     const checkServer = useCallback(() => {
         const checkId = ++checkIdRef.current;
+        setRefreshing(true);
         activeSocketRef.current?.disconnect();
         activeSocketRef.current = null;
 
@@ -82,6 +84,7 @@ function useServerHealth(url: string | undefined) {
             setHealth(false);
             setConnectionLatency(null);
             setRttLatency(null);
+            setRefreshing(false);
             return;
         }
 
@@ -92,6 +95,7 @@ function useServerHealth(url: string | undefined) {
             reconnection: false,
             timeout: HEALTH_TIMEOUT_MS,
             autoConnect: true,
+            forceNew: true,
         });
         activeSocketRef.current = socket;
 
@@ -110,6 +114,7 @@ function useServerHealth(url: string | undefined) {
             setHealth(nextHealth);
             setConnectionLatency(nextConnectionLatency);
             setRttLatency(nextRttLatency);
+            setRefreshing(false);
 
             socket.disconnect();
             if (activeSocketRef.current === socket) {
@@ -173,6 +178,7 @@ function useServerHealth(url: string | undefined) {
         health,
         connectionLatency,
         rttLatency,
+        refreshing,
         checkServer,
     };
 }
@@ -185,6 +191,9 @@ export default function ServerHealth() {
     const primary = useServerHealth(primaryUrl);
     const secondary = useServerHealth(secondaryUrl);
     const fallback = useServerHealth(fallbackUrl);
+
+    const refreshing =
+        primary.refreshing || secondary.refreshing || fallback.refreshing;
 
     const handleRefresh = useCallback(() => {
         primary.checkServer();
@@ -218,6 +227,8 @@ export default function ServerHealth() {
             <Button
                 iconName="rotateCw"
                 onClick={handleRefresh}
+                loading={refreshing}
+                loadingText="更新中…"
                 className="w-full"
             >
                 更新
