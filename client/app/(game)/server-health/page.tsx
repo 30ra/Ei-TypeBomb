@@ -119,15 +119,22 @@ function useServerHealth(url: string | undefined, timeout: number) {
 
 export default function ServerHealth() {
     const primaryUrl = process.env.NEXT_PUBLIC_PRIMARY_SERVER_URL;
-    const backupUrl = process.env.NEXT_PUBLIC_BACKUP_SERVER_URL;
+    const secondaryUrl = process.env.NEXT_PUBLIC_SECONDARY_SERVER_URL;
+    const fallbackUrl = process.env.NEXT_PUBLIC_FALLBACK_SERVER_URL;
 
     const primary = useServerHealth(primaryUrl, 4_000);
-    const backup = useServerHealth(backupUrl, 4_000);
+    const secondary = useServerHealth(secondaryUrl, 4_000);
+    const fallback = useServerHealth(fallbackUrl, 4_000);
 
     const handleRefresh = useCallback(() => {
         primary.checkServer();
-        backup.checkServer();
-    }, [primary.checkServer, backup.checkServer]);
+        secondary.checkServer();
+        fallback.checkServer();
+    }, [
+        primary.checkServer,
+        secondary.checkServer,
+        fallback.checkServer,
+    ]);
 
     return (
         <Shell title="サーバーの状況" size="small">
@@ -138,9 +145,15 @@ export default function ServerHealth() {
             />
 
             <ServerStatus
-                name="バックアップサーバー"
-                health={backup.health}
-                latency={backup.latency}
+                name="セカンダリサーバー"
+                health={secondary.health}
+                latency={secondary.latency}
+            />
+
+            <ServerStatus
+                name="フォールバックサーバー"
+                health={fallback.health}
+                latency={fallback.latency}
             />
 
             <Button
