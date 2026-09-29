@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { io } from "socket.io-client";
+import { io } from "@/lib/room/socket";
 import Shell from "@/components/layout/Shell";
 import { Icon } from "@/components/ui/Icon";
 import Button from "@/components/ui/Button";

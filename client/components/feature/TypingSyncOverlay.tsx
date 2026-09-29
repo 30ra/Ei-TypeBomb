@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { io } from "socket.io-client";
+import { io } from "@/lib/room/socket";
 import { getAuthToken } from "@/lib/room/auth";
 import { Word } from "@/type";
 

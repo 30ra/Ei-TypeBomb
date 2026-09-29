@@ -6,11 +6,27 @@
 		"deploy": "wrangler deploy",
 		"dev": "wrangler dev",
 		"start": "wrangler dev",
-		"cf-typegen": "wrangler types"
+		"cf-typegen": "wrangler types",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"build": "wrangler deploy --dry-run"
 	},
 	"devDependencies": {
+		"@cloudflare/vitest-pool-workers": "^0.22.0",
 		"@types/node": "^26.6.3",
+		"prettier": "^3.9.9",
 		"typescript": "^5.5.2",
+		"vitest": "^4.1.11",
 		"wrangler": "^4.143.0"
+	},
+	"dependencies": {
+		"@supabase/supabase-js": "2.110.8",
+		"jose": "^6.2.12"
+	},
+	"overrides": {
+		"@cloudflare/vitest-pool-workers": {
+			"miniflare": "5.20260926.0-alpha",
+			"wrangler": "4.143.0"
+		}
 	}
 }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { io } from "socket.io-client";
+import { io } from "@/lib/room/socket";
 import { getAuthToken } from "@/lib/room/auth";
 import posthog from "posthog-js";
 
