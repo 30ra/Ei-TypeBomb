@@ -293,8 +293,10 @@ Ei-TypeBomb/
 7. Keep passing the bomb before it explodes.
 8. The player holding the bomb when it explodes loses.
 
-> Playing on a PC is strongly recommended.
-> Turning off the word prediction feature is also strongly recommended.
+> **Playing on a PC is strongly recommended.**
+> 
+> When playing on an Android device, please turn off your keyboard's word prediction feature before starting the game. Leaving word prediction enabled may cause unexpected input behavior.
+
 ## Screenshots
 
 ![Home screen](./docs/screenshots/0.png)
