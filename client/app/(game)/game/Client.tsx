@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { io } from "socket.io-client";
+import { io } from "@/lib/room/socket";
 import UsersView from "@/components/feature/UsersView";
 import { useBombExplosion } from "@/components/feature/BombExplosion";
 import TypingView from "@/components/feature/InputView";
