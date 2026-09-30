@@ -88,6 +88,16 @@ it('health, origin restrictions, and upgrade requirements', async () => {
 	expect((await SELF.fetch('https://worker.test/health', { headers: { Origin: 'https://evil.test' } })).status).toBe(403);
 	expect((await SELF.fetch(`https://worker.test/ws/${roomId}`)).status).toBe(426);
 });
+it('checks database health over the health socket', async () => {
+	responses.push([{ id: roomId }]);
+	const client = await connect('health');
+	const requestId = crypto.randomUUID();
+	client.send('health:database', requestId);
+	const result = await client.next<{ requestId: string; ok: boolean; latencyMs: number }>('health:database-result');
+	expect(result.requestId).toBe(requestId);
+	expect(result.ok).toBe(true);
+	expect(result.latencyMs).toBeGreaterThanOrEqual(0);
+});
 it('rejects invalid/expired JWTs and invalid names', async () => {
 	expect(await verifyToken('invalid', 'test-only-secret')).toBeNull();
 	expect(await verifyToken(await token(roomId, '0s'), 'test-only-secret')).toBeNull();
