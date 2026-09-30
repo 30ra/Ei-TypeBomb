@@ -76,38 +76,38 @@ function useServerHealth(
 
     const checkServer = useCallback(
         (trigger: HealthCheckTrigger = "manual") => {
-        const checkId = ++checkIdRef.current;
-        setRefreshing(true);
-        activeSocketRef.current?.disconnect();
-        activeSocketRef.current = null;
+            const checkId = ++checkIdRef.current;
+            setRefreshing(true);
+            activeSocketRef.current?.disconnect();
+            activeSocketRef.current = null;
 
-        if (!url) {
+            if (!url) {
             setHealth(false);
             setConnectionLatency(null);
             setRttLatency(null);
             setRefreshing(false);
             return;
-        }
+            }
 
-        // Keep the previous result visible while refreshing. Only the initial
-        // check has health === undefined and therefore shows "接続中…".
-        const connectionStartedAt = performance.now();
-        const socket = io(url, {
+            // Keep the previous result visible while refreshing. Only the initial
+            // check has health === undefined and therefore shows "接続中…".
+            const connectionStartedAt = performance.now();
+            const socket = io(url, {
             reconnection: false,
             timeout: HEALTH_TIMEOUT_MS,
             autoConnect: true,
             forceNew: true,
-        });
-        activeSocketRef.current = socket;
+            });
+            activeSocketRef.current = socket;
 
-        let rttTimer: ReturnType<typeof setTimeout> | null = null;
-        let finished = false;
+            let rttTimer: ReturnType<typeof setTimeout> | null = null;
+            let finished = false;
 
-        const finish = (
+            const finish = (
             nextHealth: boolean,
             nextConnectionLatency: number | null,
             nextRttLatency: number | null,
-        ) => {
+            ) => {
             if (finished || checkId !== checkIdRef.current) return;
             finished = true;
             if (rttTimer) clearTimeout(rttTimer);
@@ -129,9 +129,9 @@ function useServerHealth(
             if (activeSocketRef.current === socket) {
                 activeSocketRef.current = null;
             }
-        };
+            };
 
-        const handleConnect = () => {
+            const handleConnect = () => {
             if (checkId !== checkIdRef.current) return;
 
             const nextConnectionLatency = Math.round(
@@ -154,14 +154,14 @@ function useServerHealth(
             rttTimer = setTimeout(() => {
                 finish(true, nextConnectionLatency, null);
             }, HEALTH_TIMEOUT_MS);
-        };
+            };
 
-        const handleConnectError = () => {
+            const handleConnectError = () => {
             finish(false, null, null);
-        };
+            };
 
-        socket.once("connect", handleConnect);
-        socket.once("connect_error", handleConnectError);
+            socket.once("connect", handleConnect);
+            socket.once("connect_error", handleConnectError);
         },
         [serverRole, url],
     );
