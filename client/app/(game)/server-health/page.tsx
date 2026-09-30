@@ -97,6 +97,7 @@ function useServerHealth(
                 timeout: HEALTH_TIMEOUT_MS,
                 autoConnect: true,
                 forceNew: true,
+                healthOnly: true,
             });
             activeSocketRef.current = socket;
 
