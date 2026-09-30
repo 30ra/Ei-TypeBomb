@@ -107,6 +107,7 @@ function useDatabaseHealth(
                 timeout: CONNECTION_TIMEOUT_MS,
                 autoConnect: true,
                 forceNew: true,
+                healthOnly: true,
             });
             activeSocketRef.current = socket;
 
