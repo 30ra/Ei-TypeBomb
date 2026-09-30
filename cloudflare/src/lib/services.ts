@@ -60,6 +60,20 @@ export async function getRoom(env: Secrets, id: string): Promise<Room> {
 		bombStatus: 0,
 	};
 }
+export async function checkDatabase(env: Secrets): Promise<number> {
+	const db = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+		auth: { autoRefreshToken: false, persistSession: false },
+	});
+	const startedAt = performance.now();
+	const { error } = await db
+		.from('ei_typebomb_rooms')
+		.select('id')
+		.limit(1)
+		.abortSignal(AbortSignal.timeout(10_000));
+	if (error) throw new Error(`Database health check failed: ${error.code}`);
+	return Math.round(performance.now() - startedAt);
+}
+
 export async function capture(env: Secrets, event: string, properties: Record<string, unknown> = {}) {
 	if (!env.NEXT_PUBLIC_POSTHOG_KEY) return;
 	try {
