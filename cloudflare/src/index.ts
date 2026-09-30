@@ -104,6 +104,11 @@ export class GameRoom extends DurableObject<WorkerEnv> {
 				const requestId = packet.data;
 				if (typeof requestId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId))
 					return;
+				// Keep probes on the dedicated health Durable Object and use its
+				// persisted bucket across reconnects. Only this tiny storage update
+				// is serialized; the Supabase request itself stays outside the
+				// room-wide gameplay gate.
+				if (session.roomId !== 'health' || !(await this.acceptDatabaseProbe())) return;
 				try {
 					const latencyMs = await checkDatabase(this.env);
 					this.send(ws, 'health:database-result', { requestId, ok: true, latencyMs });
@@ -139,33 +144,6 @@ export class GameRoom extends DurableObject<WorkerEnv> {
 						this.send(ws, 'health:pong', packet.data);
 					return;
 				}
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
-				if (packet.event === 'health:database') {
-					const requestId = packet.data;
-					if (typeof requestId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId))
-						return;
-					// Database probes are only available on the single, dedicated health
-					// object. Its durable bucket is shared across connections and restarts.
-					if (session.roomId !== 'health' || !(await this.acceptDatabaseProbe())) return;
-					try {
-						const latencyMs = await checkDatabase(this.env);
-						this.send(ws, 'health:database-result', { requestId, ok: true, latencyMs });
-					} catch {
-						this.send(ws, 'health:database-result', { requestId, ok: false, latencyMs: null });
-					}
-					return;
-				}
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs
 				if (packet.event === 'auth:response') {
 					const id = await verifyToken(packet.data?.jwtToken, this.env.JWT_SECRET);
 					if (!id || id !== session.roomId) throw new ClientError('認証トークンが無効または有効期限切れです。ルームに入り直してください。');
