@@ -2,14 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { io } from "@/lib/room/socket";
-import Shell from "@/components/layout/Shell";
-import { Icon } from "@/components/ui/Icon";
-import Button from "@/components/ui/Button";
 import {
     captureServerHealthCheck,
     type HealthCheckTrigger,
     type ServerRole,
 } from "@/lib/analytics/serverHealth";
+import Shell from "@/components/layout/Shell";
+import { Icon } from "@/components/ui/Icon";
+import Button from "@/components/ui/Button";
 
 const HEALTH_TIMEOUT_MS = 2_000;
 const HEALTH_REFRESH_INTERVAL_MS = 60_000;
@@ -82,21 +82,21 @@ function useServerHealth(
             activeSocketRef.current = null;
 
             if (!url) {
-            setHealth(false);
-            setConnectionLatency(null);
-            setRttLatency(null);
-            setRefreshing(false);
-            return;
+                setHealth(false);
+                setConnectionLatency(null);
+                setRttLatency(null);
+                setRefreshing(false);
+                return;
             }
 
             // Keep the previous result visible while refreshing. Only the initial
             // check has health === undefined and therefore shows "接続中…".
             const connectionStartedAt = performance.now();
             const socket = io(url, {
-            reconnection: false,
-            timeout: HEALTH_TIMEOUT_MS,
-            autoConnect: true,
-            forceNew: true,
+                reconnection: false,
+                timeout: HEALTH_TIMEOUT_MS,
+                autoConnect: true,
+                forceNew: true,
             });
             activeSocketRef.current = socket;
 
@@ -104,60 +104,61 @@ function useServerHealth(
             let finished = false;
 
             const finish = (
-            nextHealth: boolean,
-            nextConnectionLatency: number | null,
-            nextRttLatency: number | null,
+                nextHealth: boolean,
+                nextConnectionLatency: number | null,
+                nextRttLatency: number | null,
             ) => {
-            if (finished || checkId !== checkIdRef.current) return;
-            finished = true;
-            if (rttTimer) clearTimeout(rttTimer);
+                if (finished || checkId !== checkIdRef.current) return;
+                finished = true;
+                if (rttTimer) clearTimeout(rttTimer);
 
-            setHealth(nextHealth);
-            setConnectionLatency(nextConnectionLatency);
-            setRttLatency(nextRttLatency);
-            setRefreshing(false);
-            captureServerHealthCheck({
-                serverRole,
-                checkType: "rtt",
-                healthy: nextHealth,
-                latencyMs: nextRttLatency,
-                connectionLatencyMs: nextConnectionLatency,
-                trigger,
-            });
+                setHealth(nextHealth);
+                setConnectionLatency(nextConnectionLatency);
+                setRttLatency(nextRttLatency);
+                setRefreshing(false);
 
-            socket.disconnect();
-            if (activeSocketRef.current === socket) {
-                activeSocketRef.current = null;
-            }
+                captureServerHealthCheck({
+                    serverRole,
+                    checkType: "rtt",
+                    healthy: nextHealth,
+                    latencyMs: nextRttLatency,
+                    connectionLatencyMs: nextConnectionLatency,
+                    trigger,
+                });
+
+                socket.disconnect();
+                if (activeSocketRef.current === socket) {
+                    activeSocketRef.current = null;
+                }
             };
 
             const handleConnect = () => {
-            if (checkId !== checkIdRef.current) return;
+                if (checkId !== checkIdRef.current) return;
 
-            const nextConnectionLatency = Math.round(
-                performance.now() - connectionStartedAt,
-            );
-            const pingId = crypto.randomUUID();
-            const rttStartedAt = performance.now();
-
-            socket.once("health:pong", (receivedPingId: unknown) => {
-                if (receivedPingId !== pingId) return;
-
-                finish(
-                    true,
-                    nextConnectionLatency,
-                    Math.round(performance.now() - rttStartedAt),
+                const nextConnectionLatency = Math.round(
+                    performance.now() - connectionStartedAt,
                 );
-            });
+                const pingId = crypto.randomUUID();
+                const rttStartedAt = performance.now();
 
-            socket.emit("health:ping", pingId);
-            rttTimer = setTimeout(() => {
-                finish(true, nextConnectionLatency, null);
-            }, HEALTH_TIMEOUT_MS);
+                socket.once("health:pong", (receivedPingId: unknown) => {
+                    if (receivedPingId !== pingId) return;
+
+                    finish(
+                        true,
+                        nextConnectionLatency,
+                        Math.round(performance.now() - rttStartedAt),
+                    );
+                });
+
+                socket.emit("health:ping", pingId);
+                rttTimer = setTimeout(() => {
+                    finish(true, nextConnectionLatency, null);
+                }, HEALTH_TIMEOUT_MS);
             };
 
             const handleConnectError = () => {
-            finish(false, null, null);
+                finish(false, null, null);
             };
 
             socket.once("connect", handleConnect);
