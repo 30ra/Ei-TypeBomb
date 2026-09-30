@@ -8,6 +8,7 @@ import { getRoomFromId } from "./lib/get";
 import { capturePostHogEvent } from "./lib/posthog";
 import { createSocketRateLimit } from "./lib/socketRateLimit";
 import { roomDatabase } from "./lib/db";
+import { createDatabaseProbeRateLimit } from "./lib/databaseProbeRateLimit";
 import {
     logError,
     logEvent,
@@ -54,6 +55,7 @@ const httpServer = createServer(app);
 const io = new Server(httpServer, {
     cors: { origin: "*", methods: ["GET", "POST"] },
 });
+const acceptDatabaseProbe = createDatabaseProbeRateLimit();
 
 const refreshServerState = () =>
     setServerState({
@@ -149,6 +151,10 @@ io.on("connection", (socket) => {
             )
         )
             return;
+
+        // This budget is shared by every connection from an address, so opening
+        // a new unauthenticated socket cannot reset access to the database.
+        if (!acceptDatabaseProbe(socket.handshake.address)) return;
 
         const startedAt = performance.now();
         try {

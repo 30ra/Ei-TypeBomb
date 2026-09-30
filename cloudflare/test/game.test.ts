@@ -98,6 +98,23 @@ it('checks database health over the health socket', async () => {
 	expect(result.ok).toBe(true);
 	expect(result.latencyMs).toBeGreaterThanOrEqual(0);
 });
+it('shares the database health budget across reconnects and rejects room sockets', async () => {
+	responses.push([{ id: roomId }], [{ id: roomId }]);
+	const first = await connect('health');
+	first.send('health:database', crypto.randomUUID());
+	await first.next('health:database-result');
+	const second = await connect('health');
+	second.send('health:database', crypto.randomUUID());
+	await second.next('health:database-result');
+	second.send('health:database', crypto.randomUUID());
+	second.send('ping');
+	await second.next('pong');
+
+	const room = await connect();
+	room.send('health:database', crypto.randomUUID());
+	room.send('ping');
+	await room.next('pong');
+});
 it('rejects invalid/expired JWTs and invalid names', async () => {
 	expect(await verifyToken('invalid', 'test-only-secret')).toBeNull();
 	expect(await verifyToken(await token(roomId, '0s'), 'test-only-secret')).toBeNull();

@@ -13,6 +13,7 @@ declare module "pg" {
 
     export class Pool {
         constructor(config?: PoolConfig);
+        on(event: "error", listener: (error: Error) => void): this;
         query<Row = Record<string, unknown>>(
             text: string,
             values?: readonly unknown[],
