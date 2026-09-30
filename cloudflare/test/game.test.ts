@@ -98,34 +98,29 @@ it('checks database health over the health socket', async () => {
 	expect(result.ok).toBe(true);
 	expect(result.latencyMs).toBeGreaterThanOrEqual(0);
 });
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
 it('shares the database health budget across reconnects and rejects room sockets', async () => {
 	responses.push([{ id: roomId }], [{ id: roomId }]);
 	const first = await connect('health');
 	first.send('health:database', crypto.randomUUID());
 	await first.next('health:database-result');
+
 	const second = await connect('health');
 	second.send('health:database', crypto.randomUUID());
 	await second.next('health:database-result');
+
+	// The persisted health-object bucket is exhausted across reconnects.
 	second.send('health:database', crypto.randomUUID());
 	second.send('ping');
 	await second.next('pong');
 
+	// Game-room Durable Objects must never execute database probes.
 	const room = await connect();
 	room.send('health:database', crypto.randomUUID());
 	room.send('ping');
 	await room.next('pong');
-=======
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs
-it('continues processing room messages while a database health check is pending', async () => {
+});
+
+it('continues processing health messages while a database health check is pending', async () => {
 	vi.mocked(fetch).mockImplementationOnce(
 		() =>
 			new Promise<Response>((resolve) => {
@@ -134,21 +129,13 @@ it('continues processing room messages while a database health check is pending'
 	);
 	const client = await connect('health');
 	const requestId = crypto.randomUUID();
+	const pingId = crypto.randomUUID();
 	client.send('health:database', requestId);
-	client.send('health:ping', crypto.randomUUID());
-	await client.next('health:pong');
+	client.send('health:ping', pingId);
+	await client.next<string>('health:pong', (id) => id === pingId);
 	expect(await client.next<{ requestId: string; ok: boolean }>('health:database-result')).toMatchObject({ requestId, ok: true });
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
->>>>>>> theirs
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs
 });
+
 it('rejects invalid/expired JWTs and invalid names', async () => {
 	expect(await verifyToken('invalid', 'test-only-secret')).toBeNull();
 	expect(await verifyToken(await token(roomId, '0s'), 'test-only-secret')).toBeNull();
