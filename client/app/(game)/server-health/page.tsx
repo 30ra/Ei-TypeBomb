@@ -5,6 +5,11 @@ import { io } from "@/lib/room/socket";
 import Shell from "@/components/layout/Shell";
 import { Icon } from "@/components/ui/Icon";
 import Button from "@/components/ui/Button";
+import {
+    captureServerHealthCheck,
+    type HealthCheckTrigger,
+    type ServerRole,
+} from "@/lib/analytics/serverHealth";
 
 const HEALTH_TIMEOUT_MS = 2_000;
 const HEALTH_REFRESH_INTERVAL_MS = 60_000;
@@ -56,7 +61,10 @@ function ServerStatus({
     );
 }
 
-function useServerHealth(url: string | undefined) {
+function useServerHealth(
+    url: string | undefined,
+    serverRole: ServerRole,
+) {
     const [health, setHealth] = useState<boolean | undefined>(undefined);
     const [connectionLatency, setConnectionLatency] = useState<number | null>(
         null,
@@ -66,7 +74,8 @@ function useServerHealth(url: string | undefined) {
     const activeSocketRef = useRef<ReturnType<typeof io> | null>(null);
     const checkIdRef = useRef(0);
 
-    const checkServer = useCallback(() => {
+    const checkServer = useCallback(
+        (trigger: HealthCheckTrigger = "manual") => {
         const checkId = ++checkIdRef.current;
         setRefreshing(true);
         activeSocketRef.current?.disconnect();
@@ -107,6 +116,14 @@ function useServerHealth(url: string | undefined) {
             setConnectionLatency(nextConnectionLatency);
             setRttLatency(nextRttLatency);
             setRefreshing(false);
+            captureServerHealthCheck({
+                serverRole,
+                checkType: "rtt",
+                healthy: nextHealth,
+                latencyMs: nextRttLatency,
+                connectionLatencyMs: nextConnectionLatency,
+                trigger,
+            });
 
             socket.disconnect();
             if (activeSocketRef.current === socket) {
@@ -145,12 +162,17 @@ function useServerHealth(url: string | undefined) {
 
         socket.once("connect", handleConnect);
         socket.once("connect_error", handleConnectError);
-    }, [url]);
+        },
+        [serverRole, url],
+    );
 
     useEffect(() => {
-        const initialCheck = window.setTimeout(checkServer, 0);
+        const initialCheck = window.setTimeout(
+            () => checkServer("initial"),
+            0,
+        );
         const interval = window.setInterval(
-            checkServer,
+            () => checkServer("interval"),
             HEALTH_REFRESH_INTERVAL_MS,
         );
 
@@ -177,17 +199,17 @@ export default function ServerHealth() {
     const secondaryUrl = process.env.NEXT_PUBLIC_SECONDARY_SERVER_URL;
     const fallbackUrl = process.env.NEXT_PUBLIC_FALLBACK_SERVER_URL;
 
-    const primary = useServerHealth(primaryUrl);
-    const secondary = useServerHealth(secondaryUrl);
-    const fallback = useServerHealth(fallbackUrl);
+    const primary = useServerHealth(primaryUrl, "primary");
+    const secondary = useServerHealth(secondaryUrl, "secondary");
+    const fallback = useServerHealth(fallbackUrl, "fallback");
 
     const refreshing =
         primary.refreshing || secondary.refreshing || fallback.refreshing;
 
     const handleRefresh = useCallback(() => {
-        primary.checkServer();
-        secondary.checkServer();
-        fallback.checkServer();
+        primary.checkServer("manual");
+        secondary.checkServer("manual");
+        fallback.checkServer("manual");
     }, [primary.checkServer, secondary.checkServer, fallback.checkServer]);
 
     return (
