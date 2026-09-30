@@ -1,10 +1,11 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { GameState, Session, WorkerEnv } from './types';
-import { capture, ClientError, getRoom, validateDisplayName, verifyToken } from './lib/services';
+import { capture, checkDatabase, ClientError, getRoom, validateDisplayName, verifyToken } from './lib/services';
 import { acceptEvent } from './lib/rateLimit';
 
 const IDLE_TIMEOUT = 75_000;
 const AUTH_TIMEOUT = 20_000;
+const DATABASE_PROBE_BUCKET_KEY = 'database-probe-bucket';
 
 export class GameRoom extends DurableObject<WorkerEnv> {
 	private game?: GameState;
@@ -47,6 +48,23 @@ export class GameRoom extends DurableObject<WorkerEnv> {
 		if (deadlines.length) await this.ctx.storage.setAlarm(Math.max(Date.now() + 1, Math.min(...deadlines)));
 		else await this.ctx.storage.deleteAlarm();
 	}
+	private async acceptDatabaseProbe(now = Date.now()) {
+		const capacity = 2;
+		const perSecond = 0.2;
+		const bucket = (await this.ctx.storage.get<{ tokens: number; updatedAt: number }>(DATABASE_PROBE_BUCKET_KEY)) ?? {
+			tokens: capacity,
+			updatedAt: now,
+		};
+		bucket.tokens = Math.min(capacity, bucket.tokens + (Math.max(0, now - bucket.updatedAt) * perSecond) / 1000);
+		bucket.updatedAt = now;
+		if (bucket.tokens < 1) {
+			await this.ctx.storage.put(DATABASE_PROBE_BUCKET_KEY, bucket);
+			return false;
+		}
+		bucket.tokens -= 1;
+		await this.ctx.storage.put(DATABASE_PROBE_BUCKET_KEY, bucket);
+		return true;
+	}
 	async fetch(request: Request): Promise<Response> {
 		// A fresh connection cannot inherit stale players after all old sockets disappeared.
 		if (!this.ctx.getWebSockets().length) this.game = undefined;
@@ -66,6 +84,40 @@ export class GameRoom extends DurableObject<WorkerEnv> {
 		return new Response(null, { status: 101, webSocket: pair[0] });
 	}
 	async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
+		// Database probes do not read or mutate game state. Keep the slow network
+		// request outside the room-wide input gate so gameplay can continue while
+		// Supabase is responding.
+		if (typeof message === 'string' && message.length <= 16_384) {
+			let packet: { event?: unknown; data?: unknown } | undefined;
+			try {
+				packet = JSON.parse(message);
+			} catch {
+				// The serialized handler below reports malformed packets consistently.
+			}
+			if (packet?.event === 'health:database') {
+				const session = ws.deserializeAttachment() as Session;
+				if (!acceptEvent(session, packet.event)) {
+					ws.serializeAttachment(session);
+					return;
+				}
+				ws.serializeAttachment(session);
+				const requestId = packet.data;
+				if (typeof requestId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId))
+					return;
+				// Keep probes on the dedicated health Durable Object and use its
+				// persisted bucket across reconnects. Only this tiny storage update
+				// is serialized; the Supabase request itself stays outside the
+				// room-wide gameplay gate.
+				if (session.roomId !== 'health' || !(await this.acceptDatabaseProbe())) return;
+				try {
+					const latencyMs = await checkDatabase(this.env);
+					this.send(ws, 'health:database-result', { requestId, ok: true, latencyMs });
+				} catch {
+					this.send(ws, 'health:database-result', { requestId, ok: false, latencyMs: null });
+				}
+				return;
+			}
+		}
 		// Serialize asynchronous auth/DB reads with joins, disconnects, and alarms.
 		await this.ctx.blockConcurrencyWhile(async () => {
 			const session = ws.deserializeAttachment() as Session;
@@ -88,10 +140,7 @@ export class GameRoom extends DurableObject<WorkerEnv> {
 				}
 				ws.serializeAttachment(session);
 				if (packet.event === 'health:ping') {
-					if (
-						typeof packet.data === 'string' &&
-						/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(packet.data)
-					)
+					if (typeof packet.data === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(packet.data))
 						this.send(ws, 'health:pong', packet.data);
 					return;
 				}

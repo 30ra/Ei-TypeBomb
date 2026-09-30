@@ -30,6 +30,8 @@ for (const [event, capacity, refillMs] of [
     ["room:leave", 5, 500],
     ["game:start", 2, 1000],
     ["auth:response", 3, 2000],
+    ["health:ping", 2, 5000],
+    ["health:database", 2, 5000],
 ] as const) {
     test(`${event}: bounds bursts and recovers after excess traffic`, () => {
         const h = harness();
@@ -67,7 +69,15 @@ test("budgets are independent across events and connections", () => {
     const h = harness();
     for (let i = 0; i < 60; i++) h.accept("currentInput");
     assert.equal(h.accept("currentInput"), false);
-    for (const event of ["word:success", "room:leave", "room:join", "auth:response", "game:start"])
+    for (const event of [
+        "word:success",
+        "room:leave",
+        "room:join",
+        "auth:response",
+        "game:start",
+        "health:ping",
+        "health:database",
+    ])
         assert.equal(h.accept(event), true);
     assert.equal(harness().accept("currentInput"), true);
     for (const event of ["unknown", "toString", "__proto__"])

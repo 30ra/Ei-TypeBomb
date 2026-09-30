@@ -12,6 +12,7 @@ type Options = {
   timeout?: number;
   autoConnect?: boolean;
   forceNew?: boolean;
+  healthOnly?: boolean;
 };
 
 export class WorkerSocket {
@@ -68,7 +69,7 @@ export class WorkerSocket {
       const token = await getAuthToken();
       if (this.stopped || attempt !== this.attempt) return;
       let roomId = "health";
-      if (token) {
+      if (token && !this.options.healthOnly) {
         try {
           const id = decodeJwt(token).id;
           if (typeof id === "string") roomId = id;

@@ -11,17 +11,18 @@ import Shell from "@/components/layout/Shell";
 import { Icon } from "@/components/ui/Icon";
 import Button from "@/components/ui/Button";
 
-const HEALTH_TIMEOUT_MS = 2_000;
+const CONNECTION_TIMEOUT_MS = 2_000;
+const DATABASE_TIMEOUT_MS = 7_000;
 const HEALTH_REFRESH_INTERVAL_MS = 60_000;
 
-function ServerStatus({
+function DatabaseStatus({
     name,
     health,
-    rttLatency,
+    latencyMs,
 }: {
     name: string;
     health: boolean | undefined;
-    rttLatency: number | null;
+    latencyMs: number | null;
 }) {
     return (
         <div
@@ -50,8 +51,8 @@ function ServerStatus({
                 />
 
                 {health === true
-                    ? rttLatency !== null
-                        ? `${rttLatency}ms`
+                    ? latencyMs !== null
+                        ? `${latencyMs}ms`
                         : "正常"
                     : health === false
                       ? "エラー"
@@ -61,15 +62,12 @@ function ServerStatus({
     );
 }
 
-function useServerHealth(
+function useDatabaseHealth(
     url: string | undefined,
     serverRole: ServerRole,
 ) {
     const [health, setHealth] = useState<boolean | undefined>(undefined);
-    const [connectionLatency, setConnectionLatency] = useState<number | null>(
-        null,
-    );
-    const [rttLatency, setRttLatency] = useState<number | null>(null);
+    const [latencyMs, setLatencyMs] = useState<number | null>(null);
     const [refreshing, setRefreshing] = useState(false);
     const activeSocketRef = useRef<ReturnType<typeof io> | null>(null);
     const checkIdRef = useRef(0);
@@ -81,89 +79,93 @@ function useServerHealth(
             activeSocketRef.current?.disconnect();
             activeSocketRef.current = null;
 
-            if (!url) {
-                setHealth(false);
-                setConnectionLatency(null);
-                setRttLatency(null);
+            const finish = (
+                nextHealth: boolean,
+                nextLatencyMs: number | null,
+            ) => {
+                if (checkId !== checkIdRef.current) return;
+
+                setHealth(nextHealth);
+                setLatencyMs(nextLatencyMs);
                 setRefreshing(false);
+                captureServerHealthCheck({
+                    serverRole,
+                    checkType: "database",
+                    healthy: nextHealth,
+                    latencyMs: nextLatencyMs,
+                    trigger,
+                });
+            };
+
+            if (!url) {
+                finish(false, null);
                 return;
             }
 
-            // Keep the previous result visible while refreshing. Only the initial
-            // check has health === undefined and therefore shows "接続中…".
-            const connectionStartedAt = performance.now();
             const socket = io(url, {
                 reconnection: false,
-                timeout: HEALTH_TIMEOUT_MS,
+                timeout: CONNECTION_TIMEOUT_MS,
                 autoConnect: true,
                 forceNew: true,
                 healthOnly: true,
             });
             activeSocketRef.current = socket;
 
-            let rttTimer: ReturnType<typeof setTimeout> | null = null;
+            let databaseTimer: ReturnType<typeof setTimeout> | null = null;
             let finished = false;
 
-            const finish = (
+            const finishAndDisconnect = (
                 nextHealth: boolean,
-                nextConnectionLatency: number | null,
-                nextRttLatency: number | null,
+                nextLatencyMs: number | null,
             ) => {
                 if (finished || checkId !== checkIdRef.current) return;
                 finished = true;
-                if (rttTimer) clearTimeout(rttTimer);
+                if (databaseTimer) clearTimeout(databaseTimer);
 
-                setHealth(nextHealth);
-                setConnectionLatency(nextConnectionLatency);
-                setRttLatency(nextRttLatency);
-                setRefreshing(false);
-
-                captureServerHealthCheck({
-                    serverRole,
-                    checkType: "rtt",
-                    healthy: nextHealth,
-                    latencyMs: nextRttLatency,
-                    connectionLatencyMs: nextConnectionLatency,
-                    trigger,
-                });
-
+                finish(nextHealth, nextLatencyMs);
                 socket.disconnect();
                 if (activeSocketRef.current === socket) {
                     activeSocketRef.current = null;
                 }
             };
 
-            const handleConnect = () => {
+            socket.once("connect", () => {
                 if (checkId !== checkIdRef.current) return;
 
-                const nextConnectionLatency = Math.round(
-                    performance.now() - connectionStartedAt,
+                const requestId = crypto.randomUUID();
+
+                socket.once(
+                    "health:database-result",
+                    (result: unknown) => {
+                        if (
+                            !result ||
+                            typeof result !== "object" ||
+                            !("requestId" in result) ||
+                            result.requestId !== requestId ||
+                            !("ok" in result) ||
+                            typeof result.ok !== "boolean"
+                        )
+                            return;
+
+                        const nextLatencyMs =
+                            "latencyMs" in result &&
+                            typeof result.latencyMs === "number"
+                                ? result.latencyMs
+                                : null;
+
+                        finishAndDisconnect(result.ok, nextLatencyMs);
+                    },
                 );
-                const pingId = crypto.randomUUID();
-                const rttStartedAt = performance.now();
 
-                socket.once("health:pong", (receivedPingId: unknown) => {
-                    if (receivedPingId !== pingId) return;
+                socket.emit("health:database", requestId);
+                databaseTimer = setTimeout(() => {
+                    finishAndDisconnect(false, null);
+                }, DATABASE_TIMEOUT_MS);
+            });
 
-                    finish(
-                        true,
-                        nextConnectionLatency,
-                        Math.round(performance.now() - rttStartedAt),
-                    );
-                });
-
-                socket.emit("health:ping", pingId);
-                rttTimer = setTimeout(() => {
-                    finish(true, nextConnectionLatency, null);
-                }, HEALTH_TIMEOUT_MS);
-            };
-
-            const handleConnectError = () => {
-                finish(false, null, null);
-            };
-
-            socket.once("connect", handleConnect);
-            socket.once("connect_error", handleConnectError);
+            socket.once("connect_error", () => {
+                finishAndDisconnect(false, null);
+            });
         },
         [serverRole, url],
     );
@@ -189,21 +191,25 @@ function useServerHealth(
 
     return {
         health,
-        connectionLatency,
-        rttLatency,
+        latencyMs,
         refreshing,
         checkServer,
     };
 }
 
-export default function ServerHealth() {
-    const primaryUrl = process.env.NEXT_PUBLIC_PRIMARY_SERVER_URL;
-    const secondaryUrl = process.env.NEXT_PUBLIC_SECONDARY_SERVER_URL;
-    const fallbackUrl = process.env.NEXT_PUBLIC_FALLBACK_SERVER_URL;
-
-    const primary = useServerHealth(primaryUrl, "primary");
-    const secondary = useServerHealth(secondaryUrl, "secondary");
-    const fallback = useServerHealth(fallbackUrl, "fallback");
+export default function DatabaseHealth() {
+    const primary = useDatabaseHealth(
+        process.env.NEXT_PUBLIC_PRIMARY_SERVER_URL,
+        "primary",
+    );
+    const secondary = useDatabaseHealth(
+        process.env.NEXT_PUBLIC_SECONDARY_SERVER_URL,
+        "secondary",
+    );
+    const fallback = useDatabaseHealth(
+        process.env.NEXT_PUBLIC_FALLBACK_SERVER_URL,
+        "fallback",
+    );
 
     const refreshing =
         primary.refreshing || secondary.refreshing || fallback.refreshing;
@@ -216,7 +222,7 @@ export default function ServerHealth() {
 
     return (
         <Shell
-            title="サーバーの状況"
+            title="データベースの状況"
             size="small"
             loading={
                 primary.health === undefined &&
@@ -224,22 +230,20 @@ export default function ServerHealth() {
                 fallback.health === undefined
             }
         >
-            <ServerStatus
+            <DatabaseStatus
                 name="プレイマリサーバー"
                 health={primary.health}
-                rttLatency={primary.rttLatency}
+                latencyMs={primary.latencyMs}
             />
-
-            <ServerStatus
+            <DatabaseStatus
                 name="セカンダリサーバー"
                 health={secondary.health}
-                rttLatency={secondary.rttLatency}
+                latencyMs={secondary.latencyMs}
             />
-
-            <ServerStatus
+            <DatabaseStatus
                 name="フォールバックサーバー"
                 health={fallback.health}
-                rttLatency={fallback.rttLatency}
+                latencyMs={fallback.latencyMs}
             />
 
             <Button

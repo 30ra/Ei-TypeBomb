@@ -17,3 +17,7 @@ export const roomDatabase = new Pool({
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 5_000,
 });
+
+roomDatabase.on("error", (error) => {
+    console.error("[DATABASE] Unexpected error on idle PostgreSQL client", error);
+});
