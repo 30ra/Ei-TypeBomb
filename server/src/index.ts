@@ -7,6 +7,7 @@ import { verifyToken } from "./lib/auth";
 import { getRoomFromId } from "./lib/get";
 import { capturePostHogEvent } from "./lib/posthog";
 import { createSocketRateLimit } from "./lib/socketRateLimit";
+import { roomDatabase } from "./lib/db";
 import {
     logError,
     logEvent,
@@ -138,6 +139,37 @@ io.on("connection", (socket) => {
         )
             return;
         socket.emit("health:pong", pingId);
+    });
+
+    socket.on("health:database", async (requestId: unknown) => {
+        if (
+            typeof requestId !== "string" ||
+            !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+                requestId,
+            )
+        )
+            return;
+
+        const startedAt = performance.now();
+        try {
+            await roomDatabase.query(
+                "SELECT id FROM public.ei_typebomb_rooms LIMIT 1",
+            );
+            socket.emit("health:database-result", {
+                requestId,
+                ok: true,
+                latencyMs: Math.round(performance.now() - startedAt),
+            });
+        } catch (error) {
+            logError("Database health check failed", error, {
+                socketId: socket.id,
+            });
+            socket.emit("health:database-result", {
+                requestId,
+                ok: false,
+                latencyMs: null,
+            });
+        }
     });
 
     const reportError = (
