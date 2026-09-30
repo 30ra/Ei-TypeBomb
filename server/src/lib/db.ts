@@ -1,15 +1,19 @@
 import dotenv from "dotenv";
 dotenv.config();
 
-import { createClient } from "@supabase/supabase-js";
+import { Pool } from "pg";
 
-export const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    {
-        auth: {
-            autoRefreshToken: false,
-            persistSession: false,
-        },
-    },
-);
+const connectionString = process.env.SUPABASE_DATABASE_URL;
+
+if (!connectionString) {
+    throw new Error(
+        "SUPABASE_DATABASE_URL is required for the read-only room database connection.",
+    );
+}
+
+export const roomDatabase = new Pool({
+    connectionString,
+    max: 5,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 5_000,
+});

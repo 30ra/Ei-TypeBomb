@@ -1,3 +1,14 @@
+# Database connection
+
+The Socket.IO server reads room configuration directly from PostgreSQL with a
+least-privilege database role. It no longer needs a Supabase service-role key.
+
+Set `SUPABASE_DATABASE_URL` to a PostgreSQL connection string that authenticates
+as the read-only `etb_server` role. The role only needs `SELECT` access to
+`public.ei_typebomb_rooms` plus the matching RLS policy.
+
+Do not expose this connection string to the client or commit it to the repository.
+
 # Socket.IO rate limit
 
 受信イベントは socket・イベントごとのトークンバケットで制限します。
