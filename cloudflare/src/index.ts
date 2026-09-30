@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { GameState, Session, WorkerEnv } from './types';
-import { capture, ClientError, getRoom, validateDisplayName, verifyToken } from './lib/services';
+import { capture, checkDatabase, ClientError, getRoom, validateDisplayName, verifyToken } from './lib/services';
 import { acceptEvent } from './lib/rateLimit';
 
 const IDLE_TIMEOUT = 75_000;
@@ -93,6 +93,21 @@ export class GameRoom extends DurableObject<WorkerEnv> {
 						/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(packet.data)
 					)
 						this.send(ws, 'health:pong', packet.data);
+					return;
+				}
+				if (packet.event === 'health:database') {
+					const requestId = packet.data;
+					if (
+						typeof requestId !== 'string' ||
+						!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)
+					)
+						return;
+					try {
+						const latencyMs = await checkDatabase(this.env);
+						this.send(ws, 'health:database-result', { requestId, ok: true, latencyMs });
+					} catch {
+						this.send(ws, 'health:database-result', { requestId, ok: false, latencyMs: null });
+					}
 					return;
 				}
 				if (packet.event === 'auth:response') {
