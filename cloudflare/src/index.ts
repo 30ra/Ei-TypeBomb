@@ -84,6 +84,35 @@ export class GameRoom extends DurableObject<WorkerEnv> {
 		return new Response(null, { status: 101, webSocket: pair[0] });
 	}
 	async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
+		// Database probes do not read or mutate game state. Keep the slow network
+		// request outside the room-wide input gate so gameplay can continue while
+		// Supabase is responding.
+		if (typeof message === 'string' && message.length <= 16_384) {
+			let packet: { event?: unknown; data?: unknown } | undefined;
+			try {
+				packet = JSON.parse(message);
+			} catch {
+				// The serialized handler below reports malformed packets consistently.
+			}
+			if (packet?.event === 'health:database') {
+				const session = ws.deserializeAttachment() as Session;
+				if (!acceptEvent(session, packet.event)) {
+					ws.serializeAttachment(session);
+					return;
+				}
+				ws.serializeAttachment(session);
+				const requestId = packet.data;
+				if (typeof requestId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId))
+					return;
+				try {
+					const latencyMs = await checkDatabase(this.env);
+					this.send(ws, 'health:database-result', { requestId, ok: true, latencyMs });
+				} catch {
+					this.send(ws, 'health:database-result', { requestId, ok: false, latencyMs: null });
+				}
+				return;
+			}
+		}
 		// Serialize asynchronous auth/DB reads with joins, disconnects, and alarms.
 		await this.ctx.blockConcurrencyWhile(async () => {
 			const session = ws.deserializeAttachment() as Session;
@@ -110,6 +139,10 @@ export class GameRoom extends DurableObject<WorkerEnv> {
 						this.send(ws, 'health:pong', packet.data);
 					return;
 				}
+<<<<<<< ours
+<<<<<<< ours
+<<<<<<< ours
+<<<<<<< ours
 				if (packet.event === 'health:database') {
 					const requestId = packet.data;
 					if (typeof requestId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId))
@@ -125,6 +158,14 @@ export class GameRoom extends DurableObject<WorkerEnv> {
 					}
 					return;
 				}
+=======
+>>>>>>> theirs
+=======
+>>>>>>> theirs
+=======
+>>>>>>> theirs
+=======
+>>>>>>> theirs
 				if (packet.event === 'auth:response') {
 					const id = await verifyToken(packet.data?.jwtToken, this.env.JWT_SECRET);
 					if (!id || id !== session.roomId) throw new ClientError('認証トークンが無効または有効期限切れです。ルームに入り直してください。');

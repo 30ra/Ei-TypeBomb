@@ -98,6 +98,10 @@ it('checks database health over the health socket', async () => {
 	expect(result.ok).toBe(true);
 	expect(result.latencyMs).toBeGreaterThanOrEqual(0);
 });
+<<<<<<< ours
+<<<<<<< ours
+<<<<<<< ours
+<<<<<<< ours
 it('shares the database health budget across reconnects and rejects room sockets', async () => {
 	responses.push([{ id: roomId }], [{ id: roomId }]);
 	const first = await connect('health');
@@ -114,6 +118,36 @@ it('shares the database health budget across reconnects and rejects room sockets
 	room.send('health:database', crypto.randomUUID());
 	room.send('ping');
 	await room.next('pong');
+=======
+=======
+>>>>>>> theirs
+=======
+>>>>>>> theirs
+=======
+>>>>>>> theirs
+it('continues processing room messages while a database health check is pending', async () => {
+	vi.mocked(fetch).mockImplementationOnce(
+		() =>
+			new Promise<Response>((resolve) => {
+				setTimeout(() => resolve(Response.json([{ id: roomId }])), 100);
+			}),
+	);
+	const client = await connect('health');
+	const requestId = crypto.randomUUID();
+	client.send('health:database', requestId);
+	client.send('health:ping', crypto.randomUUID());
+	await client.next('health:pong');
+	expect(await client.next<{ requestId: string; ok: boolean }>('health:database-result')).toMatchObject({ requestId, ok: true });
+<<<<<<< ours
+<<<<<<< ours
+<<<<<<< ours
+>>>>>>> theirs
+=======
+>>>>>>> theirs
+=======
+>>>>>>> theirs
+=======
+>>>>>>> theirs
 });
 it('rejects invalid/expired JWTs and invalid names', async () => {
 	expect(await verifyToken('invalid', 'test-only-secret')).toBeNull();

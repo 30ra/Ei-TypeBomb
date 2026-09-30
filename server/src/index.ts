@@ -8,6 +8,7 @@ import { getRoomFromId } from "./lib/get";
 import { capturePostHogEvent } from "./lib/posthog";
 import { createSocketRateLimit } from "./lib/socketRateLimit";
 import { roomDatabase } from "./lib/db";
+import { probeRoomDatabase } from "./lib/databaseHealth";
 import { createDatabaseProbeRateLimit } from "./lib/databaseProbeRateLimit";
 import {
     logError,
@@ -158,9 +159,7 @@ io.on("connection", (socket) => {
 
         const startedAt = performance.now();
         try {
-            await roomDatabase.query(
-                "SELECT id FROM public.ei_typebomb_rooms LIMIT 1",
-            );
+            await probeRoomDatabase(roomDatabase);
             socket.emit("health:database-result", {
                 requestId,
                 ok: true,
