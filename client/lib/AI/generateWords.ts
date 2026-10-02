@@ -43,9 +43,7 @@ export async function generateWords(theme: string) {
     const contents = prompts.compile(prompt.prompt, { theme, length });
     const response = await gemini.models.generateContent({
         model,
-        contents: prompt.prompt.includes("{{theme}}")
-            ? contents
-            : `${contents}\n\nTheme:\n${theme}`,
+        contents: `${contents}\n\nTheme:\n${theme}`,
         posthogPrivacyMode: true,
         posthogProperties: {
             $ai_prompt_name: prompt.name,
