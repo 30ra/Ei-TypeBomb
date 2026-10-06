@@ -67,7 +67,10 @@ export default function GameView({
         currentWord !== null &&
         (room?.words?.filter((word) => word.jp === currentWord.jp).length ?? 0) >
             1;
-    const roomHasSpace = users.length < (room?.maxPlayers ?? Infinity);
+    const roomHasSpace =
+        typeof room?.maxPlayers === "number" &&
+        room.maxPlayers > 0 &&
+        users.length < room.maxPlayers;
 
     const activeGame = currentWord === null ? (
         <div className="font-mono w-fit font-bold text-2xl" data-cursor="text">
@@ -100,7 +103,11 @@ export default function GameView({
                     if (userId === currentTurnUser?.id) onChangeInput(input);
                 }}
                 currentInput={
-                    userId === currentTurnUser?.id ? null : currentInput
+                    result !== null
+                        ? ""
+                        : userId === currentTurnUser?.id
+                          ? null
+                          : currentInput
                 }
             />
         </div>
