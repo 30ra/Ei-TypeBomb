@@ -2,9 +2,8 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import UsersView from "@/components/feature/UsersView";
 import { useBombExplosion } from "@/components/feature/BombExplosion";
-import TypingView from "@/components/feature/InputView";
+import GameView from "@/components/feature/GameView";
 import { Room, Word, User, Position } from "@/type";
 import { newPositions } from "@/lib/ui/position";
 import posthog from "posthog-js";
@@ -85,6 +84,7 @@ export default function Client({
             { id: "bot-2", displayName: "ボット2" },
         ],
         words: MOCK_WORDS,
+        title: "デモルーム",
     }));
 
     const [currentWord, setCurrentWord] = useState<Word | null>(null);
@@ -118,11 +118,6 @@ export default function Client({
     const router = useRouter();
 
     const currentTurnUser = users[currentTurn] as User | undefined;
-    const hasDuplicateMeaning =
-        currentWord !== null &&
-        (room?.words?.filter((word) => word.jp === currentWord.jp).length ??
-            0) > 1;
-
     const currentTurnRef = useRef(currentTurn);
     const usersRef = useRef(users);
 
@@ -287,137 +282,38 @@ export default function Client({
     }, [initialBackgroundMusic, router]);
 
     return (
-        <div className="flex flex-col md:flex-row w-full h-full">
-            {explosionLayer}
-            {(result !== null || lostDisplayName) && (
-                <div className="bomb-result-enter fixed flex items-center flex-col gap-4 justify-center bg-(--color-background)/75 z-1 top-0 left-0 w-screen h-screen">
-                    <div className="w-sm flex flex-col gap-4 items-center animate-[resultAnimation_1000ms_cubic-bezier(0.1,0.5,0,1)]">
-                        <div data-cursor="text" className="font-bold text-4xl">
-                            {result === true
-                                ? "あなたの負けです"
-                                : `${lostDisplayName}の負けです`}
-                        </div>
-
-                        <Button
-                            iconName="rotateCw"
-                            className="w-full"
-                            variant="primary"
-                            onClick={() => {
-                                setResult(null);
-                                startGame();
-                            }}
-                        >
-                            もう一度プレイ
-                        </Button>
-
-                        <Button
-                            iconName="plus"
-                            className="w-full"
-                            onClick={() =>
-                                router.push(
-                                    process.env.NEXT_PUBLIC_SIGN_IN_URL!,
-                                )
-                            }
-                        >
-                            ルームを作成
-                        </Button>
-
-                        <Button
-                            iconName="link"
-                            className="w-full"
-                            onClick={() => router.push("/room")}
-                        >
-                            招待リンクで参加
-                        </Button>
-                    </div>
-                </div>
-            )}
-
-            <div className="max-w-3xl md:order-2 w-full px-4 gap-4 pb-4 pt-4 h-full justify-end flex flex-col">
-                <div
-                    className={`flex flex-col bg-(--color-background-secondary) transition-all duration-(--duration-etb) ease-[cubic-bezier(0.1,0.5,0,1)] ${currentTurn === 0 ? "h-full" : "h-64"} rounded-2xl p-2 w-full`}
+        <GameView
+            room={room}
+            users={users}
+            positions={userPositions}
+            userId={userId}
+            currentTurn={currentTurn}
+            bombStatus={bombStatus}
+            currentWord={currentWord}
+            currentInput={currentInput}
+            isStarted={isStarted}
+            result={result}
+            lostDisplayName={lostDisplayName}
+            bombRef={bombRef}
+            explosionLayer={explosionLayer}
+            onSuccess={handleSuccess}
+            onChangeInput={setCurrentInput}
+            onPlayAgain={() => {
+                setResult(null);
+                startGame();
+            }}
+            onCreateRoom={() =>
+                router.push(process.env.NEXT_PUBLIC_SIGN_IN_URL!)
+            }
+            resultExtraActions={
+                <Button
+                    iconName="link"
+                    className="w-full"
+                    onClick={() => router.push("/room")}
                 >
-                    {room && (
-                        <div className="flex flex-col h-full">
-                            <div className="flex h-full">
-                                <div className="w-full flex flex-col items-center justify-center gap-4">
-                                    {isStarted ? (
-                                        currentWord === null ? (
-                                            <div
-                                                className="font-mono w-fit font-bold text-2xl"
-                                                data-cursor="text"
-                                            >
-                                                ゲーム開始
-                                            </div>
-                                        ) : (
-                                            <div className="flex h-full items-center justify-center flex-col gap-2 w-full">
-                                                {currentTurnUser && (
-                                                    <div
-                                                        className="font-bold opacity-50 px-2 pt-1 pb-1 w-fit flex"
-                                                        data-cursor="text"
-                                                    >
-                                                        {currentTurnUser?.id !==
-                                                        userId
-                                                            ? currentTurnUser.displayName +
-                                                              "の番です"
-                                                            : "あなたの番です"}
-                                                    </div>
-                                                )}
-
-                                                <TypingView
-                                                    hasDuplicateMeaning={
-                                                        hasDuplicateMeaning
-                                                    }
-                                                    japanese={currentWord.jp}
-                                                    english={currentWord.en}
-                                                    bombStatus={bombStatus}
-                                                    onSuccess={handleSuccess}
-                                                    onChangeInput={(input) => {
-                                                        if (
-                                                            userId ==
-                                                            currentTurnUser?.id
-                                                        ) {
-                                                            setCurrentInput(
-                                                                input,
-                                                            );
-                                                        }
-                                                    }}
-                                                    currentInput={
-                                                        result !== null
-                                                            ? ""
-                                                            : userId ===
-                                                                currentTurnUser?.id
-                                                              ? null
-                                                              : currentInput
-                                                    }
-                                                />
-                                            </div>
-                                        )
-                                    ) : null}
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            <div className="w-full relative md:order-1 flex justify-center items-center h-full">
-                <div
-                    className="absolute top-0 left-0 pl-4 md:top-3 w-full flex truncate line-clamp-1 font-bold font-mono text-lg"
-                    data-cursor="text"
-                >
-                    デモルーム
-                </div>
-                <UsersView
-                    bombRef={bombRef}
-                    exploded={result !== null}
-                    users={users}
-                    positions={userPositions}
-                    bombStatus={bombStatus}
-                    currentTurn={currentTurn}
-                    userId={userId}
-                />
-            </div>
-        </div>
+                    招待リンクで参加
+                </Button>
+            }
+        />
     );
 }
