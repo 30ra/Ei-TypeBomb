@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { io } from "@/lib/room/socket";
 import { getAuthToken } from "@/lib/room/auth";
-const HINT_INTERVAL_MS = 5_000;
+import type {
+    RecallObservation,
+    RecallProgress,
+} from "@/lib/playground/memory";
+
+const DEFAULT_HINT_INTERVALS_MS = [5_000];
 
 const correctPrefixLength = (input: string[], answer: string) => {
     let length = 0;
@@ -39,6 +44,9 @@ export default function TypingView({
     bombStatus,
     hasDuplicateMeaning = false,
     enableRemoteTypingSync = true,
+    hintIntervalsMs = DEFAULT_HINT_INTERVALS_MS,
+    onRecallProgress,
+    onRecallComplete,
 }: {
     japanese: string;
     english: string | null;
@@ -48,6 +56,9 @@ export default function TypingView({
     bombStatus?: number | null;
     hasDuplicateMeaning?: boolean;
     enableRemoteTypingSync?: boolean;
+    hintIntervalsMs?: number[];
+    onRecallProgress?: (progress: RecallProgress) => void;
+    onRecallComplete?: (observation: RecallObservation) => void;
 }) {
     const baseHintCount = hasDuplicateMeaning ? 1 : 0;
     const [timedHintCount, setTimedHintCount] = useState(0);
@@ -56,6 +67,7 @@ export default function TypingView({
     const [input, setInput] = useState<string[]>(
         english ? Array(english.length).fill("") : [],
     );
+    const inputStateRef = useRef(input);
     const [currentSelection, setCurrentSelection] = useState(0);
     const inputRef = useRef<HTMLInputElement | null>(null);
     const inputFrameRef = useRef<HTMLDivElement | null>(null);
@@ -64,6 +76,11 @@ export default function TypingView({
     const [syncedInput, setSyncedInput] = useState("");
     const wordKey = JSON.stringify([japanese, english]);
     const [previousWordKey, setPreviousWordKey] = useState(wordKey);
+    const recallStartedAtRef = useRef(performance.now());
+    const firstKeyAtRef = useRef<number | null>(null);
+    const attemptCountRef = useRef(1);
+    const maxCorrectPrefixRef = useRef(0);
+    const hintIntervalsKey = hintIntervalsMs.join(",");
 
     if (previousWordKey !== wordKey) {
         setPreviousWordKey(wordKey);
@@ -74,9 +91,26 @@ export default function TypingView({
         setCharInput("");
         setSyncedInput("");
         setIsFailAnimating(false);
+        recallStartedAtRef.current = performance.now();
+        firstKeyAtRef.current = null;
+        attemptCountRef.current = 1;
+        maxCorrectPrefixRef.current = 0;
     }
 
     const isReadonly = currentInput !== null;
+
+    useEffect(() => {
+        inputStateRef.current = input;
+    }, [input]);
+
+    useEffect(() => {
+        if (isReadonly || !english) return;
+
+        recallStartedAtRef.current = performance.now();
+        firstKeyAtRef.current = null;
+        attemptCountRef.current = 1;
+        maxCorrectPrefixRef.current = 0;
+    }, [english, isReadonly, wordKey]);
 
     useEffect(() => {
         if (isReadonly || !english) {
@@ -87,14 +121,51 @@ export default function TypingView({
 
         setTimedHintCount(0);
         setRevealedHintLength(baseHintCount);
-        const timer = setInterval(() => {
-            setTimedHintCount((count) =>
-                Math.min(count + 1, english.length),
-            );
-        }, HINT_INTERVAL_MS);
 
-        return () => clearInterval(timer);
-    }, [english, isReadonly, wordKey]);
+        let cancelled = false;
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        let hintIndex = 0;
+
+        const scheduleNextHint = () => {
+            if (cancelled || hintIndex >= english.length) return;
+
+            const delay =
+                hintIntervalsMs[
+                    Math.min(
+                        hintIndex,
+                        Math.max(0, hintIntervalsMs.length - 1),
+                    )
+                ] ?? 2_500;
+
+            timer = setTimeout(() => {
+                setTimedHintCount((count) =>
+                    Math.min(count + 1, english.length),
+                );
+                setRevealedHintLength((currentLength) => {
+                    const nextHintLength = Math.min(
+                        english.length,
+                        correctPrefixLength(inputStateRef.current, english) + 1,
+                    );
+                    return Math.max(currentLength, nextHintLength);
+                });
+                hintIndex += 1;
+                scheduleNextHint();
+            }, delay);
+        };
+
+        scheduleNextHint();
+
+        return () => {
+            cancelled = true;
+            if (timer) clearTimeout(timer);
+        };
+    }, [
+        english,
+        hintIntervalsKey,
+        hintIntervalsMs,
+        isReadonly,
+        wordKey,
+    ]);
 
     useEffect(() => {
         if (!isReadonly) {
@@ -148,6 +219,9 @@ export default function TypingView({
 
     const resetInput = () => {
         if (!english) return;
+        if (input.some((character) => character !== "")) {
+            attemptCountRef.current += 1;
+        }
         setInput(Array(english.length).fill(""));
         setCurrentSelection(0);
         setCharInput("");
@@ -156,23 +230,10 @@ export default function TypingView({
     };
 
     const hintCount = baseHintCount + timedHintCount;
-    const calculatedHintLength = english
-        ? Math.min(
-              english.length,
-              correctPrefixLength(input, english) + hintCount,
-          )
-        : 0;
-    const hintLength = Math.max(
-        revealedHintLength,
-        calculatedHintLength,
-    );
+    const hintLength = revealedHintLength;
 
     useEffect(() => {
         if (isReadonly || !english || hintLength === 0) return;
-
-        if (hintLength > revealedHintLength) {
-            setRevealedHintLength(hintLength);
-        }
 
         const hasWrongHintedCharacter = input
             .slice(0, hintLength)
@@ -182,6 +243,9 @@ export default function TypingView({
             );
 
         if (hasWrongHintedCharacter) {
+            if (input.some((character) => character !== "")) {
+                attemptCountRef.current += 1;
+            }
             setInput(Array(english.length).fill(""));
             setCurrentSelection(0);
             setCharInput("");
@@ -197,19 +261,48 @@ export default function TypingView({
         input,
         isReadonly,
         onChangeInput,
-        revealedHintLength,
+    ]);
+
+    useEffect(() => {
+        if (isReadonly || !english) return;
+
+        onRecallProgress?.({
+            attemptCount: attemptCountRef.current,
+            hintCount,
+            revealedHintChars: hintLength,
+            maxCorrectPrefixLength: maxCorrectPrefixRef.current,
+            recallLatencyMs:
+                firstKeyAtRef.current === null
+                    ? null
+                    : Math.max(
+                          0,
+                          firstKeyAtRef.current -
+                              recallStartedAtRef.current,
+                      ),
+            elapsedMs: Math.max(
+                0,
+                performance.now() - recallStartedAtRef.current,
+            ),
+        });
+    }, [
+        english,
+        hintCount,
+        hintLength,
+        input,
+        isReadonly,
+        onRecallProgress,
     ]);
 
     if (!english) return null;
 
     const moveToNext = (next: string[]) => {
         const nextIndex = currentSelection + 1;
-        const nextHintLength = Math.min(
-            english.length,
-            correctPrefixLength(next, english) + hintCount,
+        maxCorrectPrefixRef.current = Math.max(
+            maxCorrectPrefixRef.current,
+            correctPrefixLength(next, english),
         );
         const typedInsideHint =
-            currentSelection < nextHintLength &&
+            currentSelection < hintLength &&
             next[currentSelection] !== english[currentSelection];
 
         if (typedInsideHint) {
@@ -223,6 +316,32 @@ export default function TypingView({
         } else {
             const result = next.join("");
             if (result === english) {
+                const observation: RecallObservation = {
+                    success: true,
+                    answerLength: english.length,
+                    firstAttemptCorrect:
+                        attemptCountRef.current === 1 &&
+                        hintCount === 0,
+                    attemptCount: attemptCountRef.current,
+                    hintCount,
+                    revealedHintChars: hintLength,
+                    maxCorrectPrefixLength:
+                        maxCorrectPrefixRef.current,
+                    recallLatencyMs:
+                        firstKeyAtRef.current === null
+                            ? null
+                            : Math.max(
+                                  0,
+                                  firstKeyAtRef.current -
+                                      recallStartedAtRef.current,
+                              ),
+                    elapsedMs: Math.max(
+                        0,
+                        performance.now() -
+                            recallStartedAtRef.current,
+                    ),
+                };
+                onRecallComplete?.(observation);
                 onSuccess();
                 const next = Array(english.length).fill("");
                 setInput(next);
@@ -329,6 +448,10 @@ export default function TypingView({
                                 const value = e.target.value;
                                 if (!value) return;
                                 const char = value.slice(-1);
+                                if (firstKeyAtRef.current === null) {
+                                    firstKeyAtRef.current =
+                                        performance.now();
+                                }
                                 const targetChar = english[currentSelection];
                                 if (targetChar === " ") {
                                     if (char === " ") {
