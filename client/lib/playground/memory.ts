@@ -315,14 +315,12 @@ export const getAdaptiveBombStageDurationMs = ({
 export const shouldRecommendStop = ({
     items,
     memoryByItem,
-    recentItemIds,
     userReviewCount,
     sessionStartedAt,
     now = Date.now(),
 }: {
     items: Item[];
     memoryByItem: Record<string, ItemMemoryState>;
-    recentItemIds: string[];
     userReviewCount: number;
     sessionStartedAt: number;
     now?: number;
@@ -340,7 +338,7 @@ export const shouldRecommendStop = ({
             getItemPriority({
                 item,
                 memory: memoryByItem[item.id],
-                recentItemIds,
+                recentItemIds: [],
                 now,
             }),
         ),
