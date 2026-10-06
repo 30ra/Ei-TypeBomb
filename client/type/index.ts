@@ -1,14 +1,31 @@
-export type Word = {
+export type LegacyWord = {
     jp: string;
     en: string;
 };
+
+export type TypedRecallItem = {
+    id: string;
+    type: "typed_recall";
+    prompt: string;
+    answer: string;
+};
+
+export type Item = TypedRecallItem;
 
 export type Room = {
     id: string;
     userId?: string;
     title?: string;
     explanation?: string;
-    words?: Word[];
+    /**
+     * Canonical in-app content model. New gameplay code should read this.
+     */
+    items?: Item[];
+    /**
+     * Legacy wire/storage shape kept while existing rooms and servers migrate.
+     * Normalize through getRoomItems() before gameplay code consumes it.
+     */
+    words?: LegacyWord[];
     maxPlayers?: number;
     gameDuration?: number;
     password?: string | null;
