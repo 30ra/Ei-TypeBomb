@@ -51,6 +51,8 @@ export default function TypingView({
 }) {
     const baseHintCount = hasDuplicateMeaning ? 1 : 0;
     const [timedHintCount, setTimedHintCount] = useState(0);
+    const [revealedHintLength, setRevealedHintLength] =
+        useState(baseHintCount);
     const [input, setInput] = useState<string[]>(
         english ? Array(english.length).fill("") : [],
     );
@@ -66,6 +68,7 @@ export default function TypingView({
     if (previousWordKey !== wordKey) {
         setPreviousWordKey(wordKey);
         setTimedHintCount(0);
+        setRevealedHintLength(baseHintCount);
         setInput(english ? Array(english.length).fill("") : []);
         setCurrentSelection(0);
         setCharInput("");
@@ -78,10 +81,12 @@ export default function TypingView({
     useEffect(() => {
         if (isReadonly || !english) {
             setTimedHintCount(0);
+            setRevealedHintLength(baseHintCount);
             return;
         }
 
         setTimedHintCount(0);
+        setRevealedHintLength(baseHintCount);
         const timer = setInterval(() => {
             setTimedHintCount((count) =>
                 Math.min(count + 1, english.length),
@@ -151,15 +156,23 @@ export default function TypingView({
     };
 
     const hintCount = baseHintCount + timedHintCount;
-    const hintLength = english
+    const calculatedHintLength = english
         ? Math.min(
               english.length,
               correctPrefixLength(input, english) + hintCount,
           )
         : 0;
+    const hintLength = Math.max(
+        revealedHintLength,
+        calculatedHintLength,
+    );
 
     useEffect(() => {
         if (isReadonly || !english || hintLength === 0) return;
+
+        if (hintLength > revealedHintLength) {
+            setRevealedHintLength(hintLength);
+        }
 
         const hasWrongHintedCharacter = input
             .slice(0, hintLength)
@@ -169,9 +182,23 @@ export default function TypingView({
             );
 
         if (hasWrongHintedCharacter) {
-            resetInput();
+            setInput(Array(english.length).fill(""));
+            setCurrentSelection(0);
+            setCharInput("");
+            inputFrameRef.current?.getAnimations().forEach((animation) => {
+                animation.currentTime = 0;
+            });
+            setIsFailAnimating(true);
+            onChangeInput("");
         }
-    }, [english, hintLength, input, isReadonly]);
+    }, [
+        english,
+        hintLength,
+        input,
+        isReadonly,
+        onChangeInput,
+        revealedHintLength,
+    ]);
 
     if (!english) return null;
 
@@ -202,6 +229,7 @@ export default function TypingView({
                 setCurrentSelection(0);
                 console.log("bombStatus", bombStatus);
                 setTimedHintCount(0);
+                setRevealedHintLength(baseHintCount);
                 onChangeInput(next.join(""));
 
                 if (isSoundEffectsEnabled()) {
