@@ -301,12 +301,8 @@ export default function TypingView({
             maxCorrectPrefixRef.current,
             correctPrefixLength(next, english),
         );
-        const nextHintLength = Math.min(
-            english.length,
-            correctPrefixLength(next, english) + hintCount,
-        );
         const typedInsideHint =
-            currentSelection < nextHintLength &&
+            currentSelection < hintLength &&
             next[currentSelection] !== english[currentSelection];
 
         if (typedInsideHint) {
