@@ -6,7 +6,7 @@ import type {
     RecallProgress,
 } from "@/lib/playground/memory";
 
-const DEFAULT_HINT_INTERVALS_MS = [6_000, 4_000, 3_000, 2_500];
+const DEFAULT_HINT_INTERVALS_MS = [5_000];
 
 const correctPrefixLength = (input: string[], answer: string) => {
     let length = 0;
