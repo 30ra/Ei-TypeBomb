@@ -91,7 +91,9 @@ export const getMyRooms = async () => {
     const supabase = await createAdminClient();
     const { data, error } = await supabase
         .from("ei_typebomb_rooms")
-        .select("*")
+        .select(
+            "id, title, user_id, explanation, max_players, password, created_at, updated_at, items, link, game_duration",
+        )
         .eq("user_id", userId);
 
     if (error) {
