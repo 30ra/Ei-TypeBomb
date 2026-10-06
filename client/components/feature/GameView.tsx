@@ -65,53 +65,58 @@ export default function GameView({
     const isParticipant = users.some((user) => user.id === userId);
     const hasDuplicateMeaning =
         currentWord !== null &&
-        (room?.words?.filter((word) => word.jp === currentWord.jp).length ?? 0) >
-            1;
+        (room?.words?.filter((word) => word.jp === currentWord.jp).length ??
+            0) > 1;
     const roomHasSpace =
         typeof room?.maxPlayers === "number" &&
         room.maxPlayers > 0 &&
         users.length < room.maxPlayers;
 
-    const activeGame = currentWord === null ? (
-        <div className="font-mono w-fit font-bold text-2xl" data-cursor="text">
-            ゲーム開始
-        </div>
-    ) : (
-        <div className="flex h-full items-center justify-center flex-col gap-2 w-full">
-            {currentTurnUser?.id === userId ? (
-                <div
-                    className="font-bold text-xl px-2 pt-1 pb-1 w-fit flex"
-                    data-cursor="text"
-                >
-                    あなたの番です
-                </div>
-            ) : currentTurnUser ? (
-                <div
-                    className="font-bold text-xl px-2 pt-1 pb-1 w-fit flex"
-                    data-cursor="text"
-                >
-                    {currentTurnUser.displayName + "の番です"}
-                </div>
-            ) : null}
-            <TypingView
-                hasDuplicateMeaning={hasDuplicateMeaning}
-                japanese={currentWord.jp}
-                english={currentWord.en}
-                bombStatus={bombStatus}
-                onSuccess={onSuccess}
-                onChangeInput={(input) => {
-                    if (userId === currentTurnUser?.id) onChangeInput(input);
-                }}
-                currentInput={
-                    result !== null
-                        ? ""
-                        : userId === currentTurnUser?.id
-                          ? null
-                          : currentInput
-                }
-            />
-        </div>
-    );
+    const activeGame =
+        currentWord === null ? (
+            <div
+                className="font-mono w-fit font-bold text-2xl"
+                data-cursor="text"
+            >
+                ゲーム開始
+            </div>
+        ) : (
+            <div className="flex h-full items-center justify-center flex-col gap-2 w-full">
+                {currentTurnUser?.id === userId ? (
+                    <div
+                        className="font-bold text-xl px-2 pt-1 pb-1 w-fit flex"
+                        data-cursor="text"
+                    >
+                        あなたの番です
+                    </div>
+                ) : currentTurnUser ? (
+                    <div
+                        className="font-bold text-xl px-2 pt-1 pb-1 w-fit flex"
+                        data-cursor="text"
+                    >
+                        {currentTurnUser.displayName + "の番です"}
+                    </div>
+                ) : null}
+                <TypingView
+                    hasDuplicateMeaning={hasDuplicateMeaning}
+                    japanese={currentWord.jp}
+                    english={currentWord.en}
+                    bombStatus={bombStatus}
+                    onSuccess={onSuccess}
+                    onChangeInput={(input) => {
+                        if (userId === currentTurnUser?.id)
+                            onChangeInput(input);
+                    }}
+                    currentInput={
+                        result !== null
+                            ? ""
+                            : userId === currentTurnUser?.id
+                              ? null
+                              : currentInput
+                    }
+                />
+            </div>
+        );
 
     return (
         <div className="flex flex-col md:flex-row w-full h-full">
@@ -172,8 +177,14 @@ export default function GameView({
                     className={`flex flex-col bg-(--color-background-secondary) transition-all duration-(--duration-etb) ease-etb ${serverError ? "min-h-14 h-auto justify-center" : isSpectator && !isStarted ? "opacity-0 scale-95" : isParticipant ? (isStarted ? (currentTurnUser?.id === userId ? "h-full" : "h-68") : "h-48") : isStarted ? "h-64" : "h-14"} rounded-2xl p-2 w-full`}
                 >
                     {serverError ? (
-                        <div className="flex justify-start animate-appear w-full" role="alert">
-                            <div className="font-mono w-fit pl-4 font-bold" data-cursor="text">
+                        <div
+                            className="flex justify-start animate-appear w-full"
+                            role="alert"
+                        >
+                            <div
+                                className="font-mono w-fit pl-4 font-bold"
+                                data-cursor="text"
+                            >
                                 {serverError}
                             </div>
                         </div>
@@ -195,18 +206,29 @@ export default function GameView({
                                                 <div
                                                     className="rounded-lg w-48 flex"
                                                     data-cursor="button"
-                                                    data-cursor-shape={users.length < 2 ? "2" : "0"}
+                                                    data-cursor-shape={
+                                                        users.length < 2
+                                                            ? "2"
+                                                            : "0"
+                                                    }
                                                 >
                                                     <button
                                                         className={`items-center cursor-pointer font-bold ${users.length < 2 ? "opacity-50" : "active:scale-95"} bg-cyan-600 disabled:opacity-50 w-full justify-center py-2 rounded-lg text-white h-fit flex transition-all duration-(--duration-etb) ease-etb`}
                                                         onClick={() => {
-                                                            if (users.length > 1) onStartGame?.();
+                                                            if (
+                                                                users.length > 1
+                                                            )
+                                                                onStartGame?.();
                                                         }}
                                                     >
                                                         ゲームを開始
                                                     </button>
                                                 </div>
-                                                <div className="rounded-lg w-48 flex" data-cursor="button" data-cursor-shape="1">
+                                                <div
+                                                    className="rounded-lg w-48 flex"
+                                                    data-cursor="button"
+                                                    data-cursor-shape="1"
+                                                >
                                                     <button
                                                         className="items-center text-center justify-center cursor-pointer font-bold py-2 w-full text-cyan-600 h-fit flex transition-all duration-(--duration-etb) ease-etb active:scale-95"
                                                         onClick={onLeave}
@@ -228,12 +250,19 @@ export default function GameView({
                                         !isSpectator && (
                                             <>
                                                 <div className="w-full animate-appear">
-                                                    <div className="w-fit pl-4 font-bold" data-cursor="text">
+                                                    <div
+                                                        className="w-fit pl-4 font-bold"
+                                                        data-cursor="text"
+                                                    >
                                                         接続しました
                                                     </div>
                                                 </div>
                                                 <div className="flex gap-2 animate-appear">
-                                                    <div className="rounded-lg w-14 flex" data-cursor="button" data-cursor-shape="1">
+                                                    <div
+                                                        className="rounded-lg w-14 flex"
+                                                        data-cursor="button"
+                                                        data-cursor-shape="1"
+                                                    >
                                                         <button
                                                             className="items-center text-center justify-center cursor-pointer font-bold py-2 w-full text-cyan-600 h-fit flex transition-all duration-(--duration-etb) ease-etb active:scale-95"
                                                             onClick={onWatch}
@@ -241,7 +270,11 @@ export default function GameView({
                                                             観戦
                                                         </button>
                                                     </div>
-                                                    <div className="rounded-lg w-20 flex" data-cursor="button" data-cursor-shape="0">
+                                                    <div
+                                                        className="rounded-lg w-20 flex"
+                                                        data-cursor="button"
+                                                        data-cursor-shape="0"
+                                                    >
                                                         <button
                                                             className="items-center font-bold bg-cyan-600 w-full justify-center py-2 rounded-lg text-white h-fit flex transition-all cursor-pointer duration-(--duration-etb) ease-etb active:scale-95"
                                                             onClick={onJoin}
@@ -255,7 +288,10 @@ export default function GameView({
                                     )
                                 ) : (
                                     <div className="flex justify-start animate-appear w-full">
-                                        <div className="font-mono w-fit pl-4 font-bold" data-cursor="text">
+                                        <div
+                                            className="font-mono w-fit pl-4 font-bold"
+                                            data-cursor="text"
+                                        >
                                             このルームは満員です
                                         </div>
                                     </div>
@@ -264,7 +300,10 @@ export default function GameView({
                         )
                     ) : (
                         <div className="w-full h-full flex animate-appear items-center">
-                            <div className="w-fit pl-4 font-bold gradient-text" data-cursor="text">
+                            <div
+                                className="w-fit pl-4 font-bold gradient-text"
+                                data-cursor="text"
+                            >
                                 サーバーに接続しています…
                             </div>
                         </div>
