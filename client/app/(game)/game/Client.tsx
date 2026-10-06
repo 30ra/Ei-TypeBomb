@@ -165,7 +165,6 @@ export default function Clinet({
             selected = true;
             clearPrimaryTimer();
             clearSecondaryTimer();
-            if (noticeTimer) clearTimeout(noticeTimer);
             socketRef.current = candidate.socket;
 
             for (const other of [
@@ -433,6 +432,7 @@ export default function Clinet({
         return () => {
             clearPrimaryTimer();
             clearSecondaryTimer();
+            if (noticeTimer) clearTimeout(noticeTimer);
             blipAudioRef.current?.pause();
             powerupAudioRef.current?.pause();
             primaryCandidate.socket.disconnect();
