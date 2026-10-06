@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { io } from "@/lib/room/socket";
 import { getAuthToken } from "@/lib/room/auth";
-import type { Item } from "@/type";
+import type { Item, LegacyWord } from "@/type";
+import { legacyWireWordsToItems } from "@/lib/item";
 
 type RoomSnapshot = {
     users: { id: string; displayName?: string }[];
@@ -11,6 +12,7 @@ type RoomSnapshot = {
     bombHolder: number;
     wordIndex?: number;
     items?: Item[];
+    words?: LegacyWord[];
 };
 
 export default function TypingSyncOverlay({
@@ -57,8 +59,9 @@ export default function TypingSyncOverlay({
     const currentUser = useMemo(() => room?.users?.[room.bombHolder], [room]);
 
     const currentItem = useMemo(() => {
-        if (!room || room.wordIndex === undefined || !room.items) return null;
-        return room.items[room.wordIndex] ?? null;
+        if (!room || room.wordIndex === undefined) return null;
+        const items = room.items ?? legacyWireWordsToItems(room.words);
+        return items[room.wordIndex] ?? null;
     }, [room]);
 
     const shouldShow = Boolean(
