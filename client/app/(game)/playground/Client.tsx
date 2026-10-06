@@ -19,7 +19,6 @@ import {
     applyRecallObservation,
     chooseNextItem,
     createTurnPlan,
-    getAdaptiveBombStageDurationMs,
     shouldRecommendStop,
     type ItemMemoryState,
     type RecallObservation,
@@ -105,6 +104,8 @@ export default function Client({
         string | null
     >(null);
     const [stopRecommended, setStopRecommended] = useState(false);
+    const [recallPressurePaused, setRecallPressurePaused] =
+        useState(false);
 
     const recentItemIdsRef = useRef<string[]>([]);
     const recallProgressRef = useRef<RecallProgress | null>(null);
@@ -192,6 +193,7 @@ export default function Client({
         currentItemRef.current = item;
         setCurrentItem(item);
         recallProgressRef.current = null;
+        setRecallPressurePaused(false);
 
         if (item) {
             recentItemIdsRef.current = [
@@ -373,6 +375,13 @@ export default function Client({
             }
 
             recallProgressRef.current = progress;
+            const item = currentItemRef.current;
+            if (
+                item?.type === "typed_recall" &&
+                progress.revealedHintChars >= item.answer.length
+            ) {
+                setRecallPressurePaused(true);
+            }
         },
         [],
     );
@@ -447,6 +456,21 @@ export default function Client({
         setTrackedTurn,
     ]);
 
+    const currentTurnPlan = useMemo(() => {
+        if (
+            currentTurnUser?.id !== LOCAL_USER_ID ||
+            !currentItem
+        ) {
+            return null;
+        }
+
+        return createTurnPlan(memoryByItem[currentItem.id]);
+    }, [
+        currentItem,
+        currentTurnUser?.id,
+        memoryByItem,
+    ]);
+
     useEffect(() => {
         if (
             !memoryReady ||
@@ -456,12 +480,23 @@ export default function Client({
             return;
         }
 
-        const baseDuration = getAdaptiveBombStageDurationMs({
-            items,
-            memoryByItem: memoryByItemRef.current,
-        });
+        if (
+            currentTurnPlan?.bombPressure === "paused" ||
+            recallPressurePaused
+        ) {
+            return;
+        }
+
+        const baseDuration =
+            currentTurnPlan?.retrievalWindowMs ?? 18_000;
+        const pressureMultiplier =
+            currentTurnPlan?.bombPressure === "low"
+                ? 1.35
+                : 1;
         const duration = Math.round(
-            baseDuration * (0.94 + Math.random() * 0.12),
+            baseDuration *
+                pressureMultiplier *
+                (0.94 + Math.random() * 0.12),
         );
 
         const timer = setTimeout(() => {
@@ -538,6 +573,8 @@ export default function Client({
         result,
         room.id,
         updateLocalMemory,
+        currentTurnPlan,
+        recallPressurePaused,
     ]);
 
     const currentTurnUser = users[currentTurn];
@@ -654,22 +691,10 @@ export default function Client({
         };
     }, [initialBackgroundMusic]);
 
-    const hintIntervalsMs = useMemo(() => {
-        if (
-            currentTurnUser?.id !== LOCAL_USER_ID ||
-            !currentItem
-        ) {
-            return undefined;
-        }
-
-        return createTurnPlan(
-            memoryByItem[currentItem.id],
-        ).hintIntervalsMs;
-    }, [
-        currentItem,
-        currentTurnUser?.id,
-        memoryByItem,
-    ]);
+    const activeLearningPlan =
+        currentTurnUser?.id === LOCAL_USER_ID
+            ? currentTurnPlan
+            : null;
 
     return (
         <GameView
@@ -691,7 +716,12 @@ export default function Client({
             onChangeInput={handleInputChange}
             onRecallProgress={handleRecallProgress}
             onRecallComplete={handleRecallComplete}
-            hintIntervalsMs={hintIntervalsMs}
+            learningMode={activeLearningPlan?.mode}
+            initialCueRatio={
+                activeLearningPlan?.initialCueRatio
+            }
+            cueSteps={activeLearningPlan?.cueSteps}
+            stallMs={activeLearningPlan?.stallMs}
             onPlayAgain={startGame}
             onCreateRoom={() =>
                 router.push(
