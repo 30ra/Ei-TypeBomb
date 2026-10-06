@@ -1,7 +1,7 @@
 const DAY_MS = 86_400_000;
 const clamp = (value: number, min: number, max: number) =>
     Math.min(max, Math.max(min, value));
-export const MEMORY_MODEL_VERSION = "playground-v4";
+export const MEMORY_MODEL_VERSION = "playground-v5-hints";
 const INITIAL_ENCODING_STABILITY = 0.15;
 // Product hypotheses, not calibrated measures of human memory.
 export const RECENT_EXPOSURE_MS = 3_000;
@@ -17,6 +17,15 @@ export type RecallProgress = {
     incorrectInputCount?: number;
     hintCount: number;
     revealedHintChars: number;
+    assistedPositions?: number[];
+    hintEvents?: {
+        kind: "letter" | "answer";
+        source: "manual";
+        atMs: number;
+        position: number | null;
+        correctBefore: number;
+    }[];
+    answerWasFullyRevealed?: boolean;
     maxCorrectPrefixLength: number;
     recallLatencyMs: number | null;
     elapsedMs: number;
@@ -276,7 +285,7 @@ export const recordAnswerExposure = (
     updatedAt: now.toISOString(),
 });
 
-// Every presentation starts as an unaided probe. Hints escalate only on a stall.
+// Every presentation starts without letter cues. Learning hints are requested manually.
 export const createTurnPlan = (
     memory: ItemMemoryState | undefined,
 ): TurnPlan => ({
@@ -290,7 +299,7 @@ export const createTurnPlan = (
     difficulty: memory?.difficulty ?? 5,
     initialCueRatio: 0,
     cueSteps: [0.2, 0.4, 0.7, 1],
-    hintDelaysMs: [2_000, 2_500, 3_000, 3_500],
+    hintDelaysMs: null,
     bombPressure: "normal",
     countsAsRecall: true,
 });

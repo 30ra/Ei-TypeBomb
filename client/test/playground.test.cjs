@@ -349,16 +349,16 @@ test("bomb and hint helpers retain their independent behavior", () => {
 
 test("BOT fallback stays null only before the user has answered anything", () => {
     const state = scheduler.createScheduler(["a", "b", "c"], () => 0);
-    assert.equal(scheduler.chooseBotItem(state, () => 0.5), null);
+    assert.equal(
+        scheduler.chooseBotItem(state, () => 0.5),
+        null,
+    );
 });
 
 test("BOT fallback keeps the handoff alive after a user answer when every word is protected", () => {
     const state = scheduler.createScheduler(["a", "b", "c"], () => 0);
     const selected = scheduler.chooseNextUserItem(state, {}, () => 0);
-    scheduler.recordUserAnswer(
-        state,
-        memory.evaluateRecall(observation()),
-    );
+    scheduler.recordUserAnswer(state, memory.evaluateRecall(observation()));
 
     // In a three-word room BOT_LOOKAHEAD protects the remaining cycle,
     // while the answered word may also be unavailable to the strict pool.
@@ -393,7 +393,10 @@ test("BOT random fallback prefers non-protected words before protected answered 
 
     // b/c/d are lookahead-protected and a is retry-protected, leaving e as
     // the safe random fallback.
-    assert.equal(scheduler.chooseBotItem(state, () => 0.75), "e");
+    assert.equal(
+        scheduler.chooseBotItem(state, () => 0.75),
+        "e",
+    );
 });
 
 // Exercise the real queue callback, including arrivals during an in-flight request.
@@ -680,6 +683,11 @@ test("actual input callbacks retain a wrong character through Backspace correcti
         observations = [];
     const actual = evaluate(code, {
         english: "apple",
+        completedRef: ref(false),
+        answerRevealed: false,
+        manualHints: true,
+        assistedPositions: [],
+        hintEventsRef: ref([]),
         hintLength: 0,
         hintCount: 0,
         initialCueRatio: 0,
@@ -749,4 +757,204 @@ test("a renewed failure resets confirmation; exposure-assisted success never cle
         state.turn + scheduler.SHORT_RETRY_GAP,
     );
     assert.equal(state.retries[first.itemId].reason, "failed_recall");
+});
+
+test("manual hints skip solved letters and spaces and never reveal the last unresolved letter", () => {
+    assert.equal(input.nextHintPosition([], "a", []), null);
+    assert.equal(input.nextHintPosition([], "cat", []), 0);
+    assert.equal(input.nextHintPosition([], "cat", [0, 1]), null);
+    assert.equal(
+        input.nextHintPosition(
+            ["r", "e", "c", "i", "e", "v", "e"],
+            "receive",
+            [],
+        ),
+        3,
+    );
+    assert.equal(
+        input.nextHintPosition(
+            ["a", "b", "c", "d", "e", "f", "g"],
+            "abcdefghij",
+            [],
+        ),
+        7,
+    );
+    assert.equal(
+        input.nextHintPosition(
+            ["a", "b", "c", "d", "e", "f", "g"],
+            "abcdefghij",
+            [7],
+        ),
+        8,
+    );
+    assert.equal(input.nextHintPosition([], "a b", [0]), null);
+    assert.equal(memory.createTurnPlan(undefined).hintDelaysMs, null);
+});
+
+function getInputFunction(name, globals) {
+    const source = fs.readFileSync(
+        path.join(root, "components/feature/InputView.tsx"),
+        "utf8",
+    );
+    const ast = ts.createSourceFile(
+        "Input.tsx",
+        source,
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.TSX,
+    );
+    let found;
+    function visit(node) {
+        if (ts.isVariableDeclaration(node) && node.name.getText(ast) === name)
+            found = node.initializer;
+        ts.forEachChild(node, visit);
+    }
+    visit(ast);
+    assert(found);
+    return evaluate(
+        "export const callback = " +
+            ts.createPrinter().printNode(ts.EmitHint.Expression, found, ast),
+        globals,
+    ).callback;
+}
+
+test("actual manual hint callback preserves input and records only newly supplied positions", () => {
+    const typed = ["r", "e", "c", "i", "e", "v", "e"];
+    const events = { current: [] };
+    let revealed, selection;
+    const callback = getInputFunction("requestHint", {
+        manualHints: true,
+        english: "receive",
+        answerRevealed: false,
+        completedRef: { current: false },
+        input: typed,
+        assistedPositions: [],
+        nextHintPosition: input.nextHintPosition,
+        hintEventsRef: events,
+        performance: { now: () => 7000 },
+        recallStartedAtRef: { current: 0 },
+        setAssistedPositions: (x) => {
+            revealed = x;
+        },
+        setCurrentSelection: (x) => {
+            selection = x;
+        },
+        inputRef: { current: null },
+        setAnswerRevealed: () =>
+            assert.fail("partial hint must not reveal full answer"),
+    });
+    callback(false);
+    assert.equal(typed.join(""), "recieve");
+    assert.deepEqual(Array.from(revealed), [3]);
+    assert.equal(selection, 3);
+    assert.equal(events.current[0].correctBefore, 5);
+    assert.equal(events.current[0].source, "manual");
+    assert.equal(
+        memory.evaluateRecall(
+            observation({
+                answerLength: 7,
+                revealedHintChars: 1,
+                finalCueRatio: 1 / 7,
+                additionalHintCount: 1,
+                firstAttemptCorrect: false,
+            }),
+        ).retryNeed,
+        "confirm",
+    );
+});
+
+test("answer confirmation records relearning once and never grants recall credit", () => {
+    const observations = [];
+    let advances = 0;
+    const callback = getInputFunction("confirmAnswer", {
+        english: "apple",
+        answerRevealed: true,
+        completedRef: { current: false },
+        initialCueRatio: 0,
+        hintCount: 1,
+        assistedPositions: [],
+        hintEventsRef: { current: [{ kind: "answer", source: "manual" }] },
+        attemptCountRef: { current: 1 },
+        incorrectInputCountRef: { current: 0 },
+        maxCorrectPrefixRef: { current: 0 },
+        firstKeyAtRef: { current: null },
+        recallStartedAtRef: { current: 0 },
+        performance: { now: () => 7000 },
+        onRecallComplete: (x) => observations.push(x),
+        onSuccess: () => advances++,
+    });
+    callback();
+    callback();
+    assert.equal(advances, 1);
+    assert.equal(observations.length, 1);
+    assert.equal(observations[0].success, false);
+    assert.equal(observations[0].answerWasFullyRevealed, true);
+    assert.equal(
+        memory.evaluateRecall(observations[0]).memoryEvidence,
+        "insufficient_evidence",
+    );
+    assert.equal(memory.evaluateRecall(observations[0]).retryNeed, "short");
+});
+
+test("actual playground progress callback pauses pressure on first hint", () => {
+    const saved = { current: null };
+    let paused = false;
+    const callback = getCallback("handleRecallProgress", {
+        usersRef: { current: [{ id: "local" }] },
+        currentTurnRef: { current: 0 },
+        LOCAL_USER_ID: "local",
+        recallProgressRef: saved,
+        currentItemRef: { current: { type: "typed_recall", answer: "apple" } },
+        setRecallPressurePaused: (value) => {
+            paused = value;
+        },
+    });
+    callback({ hintCount: 1, revealedHintChars: 1 });
+    assert.equal(paused, true);
+    assert.equal(saved.current.revealedHintChars, 1);
+});
+
+test("correcting an interior letter completes a retained learning answer", () => {
+    const observations = [];
+    let advanced = 0;
+    const noop = () => {};
+    const ref = (current) => ({ current });
+    const callback = getInputFunction("moveToNext", {
+        completedRef: ref(false),
+        answerRevealed: false,
+        english: "apple",
+        currentSelection: 2,
+        manualHints: true,
+        hintLength: 1,
+        hintCount: 1,
+        assistedPositions: [2],
+        hintEventsRef: ref([]),
+        initialCueRatio: 0,
+        initialCueLength: 0,
+        timedHintCount: 0,
+        learningMode: "free_recall",
+        incorrectInputCountRef: ref(1),
+        attemptCountRef: ref(2),
+        maxCorrectPrefixRef: ref(2),
+        lastCorrectProgressAtRef: ref(0),
+        firstKeyAtRef: ref(100),
+        recallStartedAtRef: ref(0),
+        correctPrefixLength: input.correctPrefixLength,
+        performance: { now: () => 8000 },
+        onRecallComplete: (x) => observations.push(x),
+        onSuccess: () => advanced++,
+        onChangeInput: noop,
+        setInput: noop,
+        setCurrentSelection: noop,
+        setTimedHintCount: noop,
+        setRevealedHintLength: noop,
+        bombStatus: 0,
+        console: { log: noop },
+        isSoundEffectsEnabled: () => false,
+    });
+    callback(Array.from("apple"));
+    assert.equal(advanced, 1);
+    assert.equal(observations[0].outcome, "cued_recall");
+    assert.equal(observations[0].revealedHintChars, 1);
+    assert.equal(observations[0].firstAttemptCorrect, false);
 });

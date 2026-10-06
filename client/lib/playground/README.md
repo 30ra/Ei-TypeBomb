@@ -1,4 +1,4 @@
-# Playground v4: coverage, bounded retries, and recall evidence
+# Playground v5 hints: coverage, bounded retries, and recall evidence
 
 `memory.ts` evaluates an observation and updates the custom long-term model. `scheduler.ts` independently chooses questions. `InputView.tsx` records incorrect characters when entered, so Backspace and input reset cannot erase that evidence. The scheduler never reads legacy graduation/phase fields.
 
@@ -52,7 +52,7 @@ Observations retain final correctness, first-attempt correctness, incorrect-char
 | Incorrect final answer / full answer revealed       | insufficient evidence             | short                               |
 | Answer exposed less than 3 seconds before prompt    | insufficient independent evidence | confirmation; never a retry success |
 
-The fast threshold is first key within 2.5 seconds and total time ≤ 2 seconds + 1.5 × expected typing time. Ordinary recall allows ≤ 1 incorrect input and ≤ 6 seconds + 2 × expected typing time. Expected typing time uses answer length and the user's sampled character interval (220 ms initially). Hints start at zero on every probe, then escalate after a 4-second stall through 20/40/70/100%. Full reveal pauses bomb pressure. These thresholds and cue ratios are product hypotheses.
+The fast threshold is first key within 2.5 seconds and total time ≤ 2 seconds + 1.5 × expected typing time. Ordinary recall allows ≤ 1 incorrect input and ≤ 6 seconds + 2 × expected typing time. Expected typing time uses answer length and the user's sampled character interval (220 ms initially). Learning probes start without letter hints. After a 6-second stall, a suggestion appears without revealing any answer. Learners can request one unresolved non-space character at a time; the last unresolved character is never automatically revealed. The first hint pauses bomb pressure for the remainder of the question. Full reveal shows the answer and meaning, with a confirmation button instead of mandatory copying. These thresholds and cue ratios are product hypotheses.
 
 The long-term model is **not FSRS**. `R = exp(-elapsedDays / S)` makes S the days until predicted retrievability is approximately 36.8%. Fast and ordinary clear recalls use the same conservative stability gain; speed primarily reduces session repetition. A corrected typo receives no failure penalty. An unsuccessful final answer or full reveal uses `S × 0.8`, bounded below by 0.12. Recent-exposure successes do not increase S or shift the last independently evaluated review date. Coefficients are not fitted to human retention data.
 
@@ -69,3 +69,13 @@ Run `npm --prefix client run test:playground` from the repository root. Simulati
 A browser reload starts a new shuffle cycle; long-term memory and queued unsent writes persist, but the session retry queue does not. Mid-answer typing is not a completed observation. Game restarts in the same mounted session retain the scheduler.
 
 Passing software tests establishes these implementation invariants, **not improved human retention**. Validate learning effects with delayed unaided recall (for example at 24 hours and seven days), matched learning time, and calibrated recall predictions. Turn gaps, retry windows, speed thresholds, and the memory coefficients remain product hypotheses.
+
+## Manual hints (2026-10-07)
+
+The playground uses manual hints; multiplayer retains the existing timed prefix hints. A hint preserves all typed characters and moves the cursor to the supplied position. On an incorrect completed learning answer, input is retained and the cursor moves to the first mismatch. Correcting that mismatch can complete the answer even before the final character position.
+
+`assistedPositions` counts only letters actually supplied by the app, not a prefix that the learner already typed. `hintEvents` records manual letter/answer requests, elapsed time, supplied position, and the count of correct unaided non-space characters immediately before the request. These are included in progress, completion, and recall analytics, without keystroke strings. Any partial hint prevents an unaided success classification and requests a later confirmation. Full reveal followed by confirmation is recorded as `success: false`, `outcome: relearned`, and requires a short retry; confirming twice cannot create duplicate observations. Each later probe starts without letter hints.
+
+This is the first implementation of the hint proposal, not a validated retention improvement. Optional timed assistance, semantic cues, cross-session cue fading, and memory-model calibration remain future experiments. The six-second suggestion and paused pressure are product hypotheses. Compare next-day/seven-day recall without letter hints at matched study time, along with practice throughput and abandonment.
+
+Research: [Qu et al. (2026), diminishing cues](https://pubmed.ncbi.nlm.nih.gov/42322471/) supports testing reduced support across practice, but its abstract does not establish an optimal timer. [van den Broek et al. (2019)](https://doi.org/10.1037/xap0000212) cautions that elaborate hints can consume repetition time without improving later unaided recall. The implementation therefore offers short, optional assistance and direct answer feedback rather than a mandatory long hint ladder.

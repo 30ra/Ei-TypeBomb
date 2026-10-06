@@ -443,6 +443,9 @@ export default function Client({
                 additional_hint_count: evidence.additionalHintCount,
                 recall_latency_ms: observation.recallLatencyMs,
                 hint_count: observation.hintCount,
+                hint_policy: "manual-letter-v1",
+                assisted_positions: observation.assistedPositions,
+                hint_events: observation.hintEvents,
                 revealed_hint_chars: observation.revealedHintChars,
                 max_correct_prefix_length: observation.maxCorrectPrefixLength,
                 attempt_count: observation.attemptCount,
@@ -548,7 +551,9 @@ export default function Client({
         const item = currentItemRef.current;
         if (
             item?.type === "typed_recall" &&
-            progress.revealedHintChars >= item.answer.length
+            (progress.hintCount > 0 ||
+                progress.answerWasFullyRevealed ||
+                progress.revealedHintChars >= item.answer.length)
         ) {
             setRecallPressurePaused(true);
         }
@@ -593,7 +598,14 @@ export default function Client({
     }, []);
 
     const handleSuccess = useCallback(() => {
-        if (successAudioRef.current && initialSounDeffects) {
+        const wasAnswerRevealed =
+            usersRef.current[currentTurnRef.current]?.id === LOCAL_USER_ID &&
+            recallProgressRef.current?.answerWasFullyRevealed === true;
+        if (
+            !wasAnswerRevealed &&
+            successAudioRef.current &&
+            initialSounDeffects
+        ) {
             successAudioRef.current.currentTime = 0;
             successAudioRef.current.volume = 1;
             successAudioRef.current.play().catch(() => {});
@@ -616,10 +628,13 @@ export default function Client({
         setTrackedTurn(resolved.turnIndex);
         setTrackedItem(resolved.item);
 
-        posthog.capture("word_succeeded", {
-            mode: "playground",
-            room_id: room.id,
-        });
+        posthog.capture(
+            wasAnswerRevealed ? "word_reviewed" : "word_succeeded",
+            {
+                mode: "playground",
+                room_id: room.id,
+            },
+        );
     }, [
         initialSounDeffects,
         saveBotExposure,
