@@ -1,14 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import { io } from "@/lib/room/socket";
 import { getAuthToken } from "@/lib/room/auth";
-import posthog from "posthog-js";
+const HINT_INTERVAL_MS = 5_000;
 
-type WordPrefixVariant = "control" | "prefix-1" | "prefix-3";
+const correctPrefixLength = (input: string[], answer: string) => {
+    let length = 0;
 
-const prefixLengthMap: Record<WordPrefixVariant, number> = {
-    control: 0,
-    "prefix-1": 1,
-    "prefix-3": 3,
+    while (
+        length < input.length &&
+        length < answer.length &&
+        input[length] !== "" &&
+        input[length] === answer[length]
+    ) {
+        length += 1;
+    }
+
+    return length;
 };
 
 const isSoundEffectsEnabled = () => {
@@ -42,15 +49,8 @@ export default function TypingView({
     hasDuplicateMeaning?: boolean;
     enableRemoteTypingSync?: boolean;
 }) {
-    const variant = posthog.getFeatureFlag("showWordPrefix");
-    console.log("variant", variant);
-    const prefixLength = prefixLengthMap[variant as WordPrefixVariant] ?? 0;
-    const initialPrefixLength = Math.max(
-        bombStatus === 0 ? prefixLength : 0,
-        hasDuplicateMeaning ? 1 : 0,
-    );
-
-    const [missCount, setMissCount] = useState(initialPrefixLength);
+    const baseHintCount = hasDuplicateMeaning ? 1 : 0;
+    const [timedHintCount, setTimedHintCount] = useState(0);
     const [input, setInput] = useState<string[]>(
         english ? Array(english.length).fill("") : [],
     );
@@ -65,7 +65,7 @@ export default function TypingView({
 
     if (previousWordKey !== wordKey) {
         setPreviousWordKey(wordKey);
-        setMissCount(initialPrefixLength);
+        setTimedHintCount(0);
         setInput(english ? Array(english.length).fill("") : []);
         setCurrentSelection(0);
         setCharInput("");
@@ -74,6 +74,22 @@ export default function TypingView({
     }
 
     const isReadonly = currentInput !== null;
+
+    useEffect(() => {
+        if (isReadonly || !english) {
+            setTimedHintCount(0);
+            return;
+        }
+
+        setTimedHintCount(0);
+        const timer = setInterval(() => {
+            setTimedHintCount((count) =>
+                Math.min(count + 1, english.length),
+            );
+        }, HINT_INTERVAL_MS);
+
+        return () => clearInterval(timer);
+    }, [english, isReadonly, wordKey]);
 
     useEffect(() => {
         if (!isReadonly) {
@@ -125,27 +141,58 @@ export default function TypingView({
         setIsFailAnimating(true);
     };
 
+    const resetInput = () => {
+        if (!english) return;
+        setInput(Array(english.length).fill(""));
+        setCurrentSelection(0);
+        setCharInput("");
+        triggerFailAnimation();
+        onChangeInput("");
+    };
+
+    const hintCount = baseHintCount + timedHintCount;
+    const hintLength = english
+        ? Math.min(
+              english.length,
+              correctPrefixLength(input, english) + hintCount,
+          )
+        : 0;
+
+    useEffect(() => {
+        if (isReadonly || !english || hintLength === 0) return;
+
+        const hasWrongHintedCharacter = input
+            .slice(0, hintLength)
+            .some(
+                (character, index) =>
+                    character !== "" && character !== english[index],
+            );
+
+        if (hasWrongHintedCharacter) {
+            resetInput();
+        }
+    }, [english, hintLength, input, isReadonly]);
+
     if (!english) return null;
 
     const moveToNext = (next: string[]) => {
         const nextIndex = currentSelection + 1;
+        const nextHintLength = Math.min(
+            english.length,
+            correctPrefixLength(next, english) + hintCount,
+        );
+        const typedInsideHint =
+            currentSelection < nextHintLength &&
+            next[currentSelection] !== english[currentSelection];
+
+        if (typedInsideHint) {
+            resetInput();
+            return;
+        }
+
         if (nextIndex < english.length) {
-            if (nextIndex < missCount + 1) {
-                const input = next.slice(0, nextIndex).join("");
-                const target = english.slice(0, nextIndex);
-                if (input !== target) {
-                    setInput(Array(english.length).fill(""));
-                    setCurrentSelection(0);
-                    triggerFailAnimation();
-                    onChangeInput("");
-                } else {
-                    setCurrentSelection(nextIndex);
-                    onChangeInput(next.join(""));
-                }
-            } else {
-                setCurrentSelection(nextIndex);
-                onChangeInput(next.join(""));
-            }
+            setCurrentSelection(nextIndex);
+            onChangeInput(next.join(""));
         } else {
             const result = next.join("");
             if (result === english) {
@@ -154,7 +201,7 @@ export default function TypingView({
                 setInput(next);
                 setCurrentSelection(0);
                 console.log("bombStatus", bombStatus);
-                setMissCount(initialPrefixLength);
+                setTimedHintCount(0);
                 onChangeInput(next.join(""));
 
                 if (isSoundEffectsEnabled()) {
@@ -168,11 +215,7 @@ export default function TypingView({
                 }
             } else {
                 console.log("Wrong answer. Query:", result);
-                setInput(Array(english.length).fill(""));
-                setCurrentSelection(0);
-                triggerFailAnimation();
-                onChangeInput("");
-                setMissCount(missCount + 3);
+                resetInput();
             }
         }
     };
@@ -239,7 +282,7 @@ export default function TypingView({
                                     inputRef.current?.focus();
                                 }}
                             >
-                                {index < missCount && (
+                                {index < hintLength && (
                                     <div className="absolute inset-1 pointer-events-none opacity-25 border-b border-(--color-border) flex items-center justify-center">
                                         {char}
                                     </div>
