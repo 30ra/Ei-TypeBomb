@@ -1,18 +1,71 @@
-# Playground learning model (v3)
+# Playground v4: coverage, bounded retries, and recall evidence
 
-`memory.ts` owns learning transitions and scheduling. `recall-input.ts` owns cue rounding and input checks. Run regression checks with `npm --prefix client run test:playground` from the repository root.
+`memory.ts` evaluates an observation and updates the custom long-term model. `scheduler.ts` independently chooses questions. `InputView.tsx` records incorrect characters when entered, so Backspace and input reset cannot erase that evidence. The scheduler never reads legacy graduation/phase fields.
 
-- Encoding shows the answer and pauses the bomb. Supported recall reduces the **requested cue stage** after two successes without additional hints. Two separated successes with no answer-character cues graduate an item. The Japanese prompt remains visible: `free_recall` is an application label, not the research definition of free recall.
-- At most four unfinished items are active at once. Fill this block before repeating due items. After ten user answers on an unfinished item (including hint-assisted answers and failures), defer it and admit another item. Rotation does not imply mastery: preserve the unfinished phase and cue stage, prioritize items not yet practiced this session, then resume deferred items in oldest-first order. The block attempt count resets when an item resumes and is not a long-term memory metric. When nothing is due, play continues with an admitted or graduated item. A success immediately after an answer exposure is `early_extra`: it records the attempt but does not advance the phase, stability, difficulty, or last evaluated review time. Failures still cause relearning.
-- Separation means four intervening presentation turns, or at least 30 seconds since the previous answer exposure. BOT answers count as exposures. BOTs prefer graduated items; otherwise they repeat the most recent answered item to avoid revealing the next target.
-- Phase, cue stage, and success counters persist in `learning_state`; exposures persist in `last_presented_at`. Session turn indices do not persist. Legacy rows without learning state restart at supported recall instead of assuming that five observations imply graduation.
-- Saves are serialized and retried. An authenticated-user/room-scoped local queue preserves unsent updates across reloads. Local storage and network failures can still prevent persistence; the UI reports failed network saves.
-- Bomb progress survives turn changes and changes of difficulty. Encoding, full-answer support, and hidden tabs pause it. This game clock is separate from evidence of successful recall.
+## Coverage and selection
 
-## Scientific limits
+A session starts with a Fisher–Yates shuffle of **every** room item, including all previously learned or graduated items. BOT turns do not consume this queue or increment user question indices. Every first-cycle item is selected once unless its own answer calls for a retry. Fast unaided answers produce no retry; 20 and 100 such words therefore take 20 and 100 user answers to cover.
 
-The model uses `R = exp(-elapsedDays / S)`, so `S` is the number of days until predicted retrievability reaches approximately 36.8%. It is not an empirically fitted value or an FSRS stability parameter. Initial stability, gain/penalty coefficients, cue timing, two-success graduation, four-item admission, ten-answer rotation, and the 30-second fallback are product hypotheses. Difficulty adjusts the time window, but the resulting duration is not a measured optimal retrieval time.
+Selection applies constraints before preferences:
 
-Retrieval practice and spacing have experimental support: [Karpicke & Roediger (2008)](https://learninglab.psych.purdue.edu/downloads/2008/2008_Karpicke_Roediger_Science.pdf), [Cepeda et al. (2008)](https://www.yorku.ca/ncepeda/publications/CVRWP2008.pdf), and [Finn & Metcalfe (2010)](https://www.columbia.edu/cu/psychology/metcalfe/PDFs/FinnMetcalfe2010.pdf). These studies do not validate this application's coefficients. Four-item admission is not implied by a four-chunk working-memory capacity.
+1. Serve a retry whose reserved deadline is now.
+2. On odd user turns, advance the cycle. A pending retry item cannot be selected before its earliest turn, even through the cycle.
+3. On even turns, serve the eligible retry with the earliest deadline.
+4. If no retry is eligible, advance the cycle on that turn as well.
+5. When the queue empties, start another full shuffle. Due words (`R < 0.8`) and then high-difficulty words move toward the front; no word is excluded. A retry that is also in the current cycle satisfies both obligations.
 
-`playground_item_recalled` records the model version, cue use, review context, exposure interval, outcome, and response timing for future evaluation. `recall_latency_ms` measures time until the first key press; `elapsed_ms` includes typing and correction. Neither alone measures retrieval completion. Validate improvements with unaided answer recall after a delay (for example, 24 hours and seven days), matched learning time, and prediction calibration. Passing the software tests establishes implementation behavior, not improved human retention.
+There is no active-four gate, graduation prerequisite, fixed sequence of cue successes, additive priority lottery, or 12-presentation history used for fairness. Previously serialized `learning_state` is accepted for compatibility, ignored for selection, and cleared on the next user observation.
+
+## Retry windows and feasibility
+
+All constants below are **product hypotheses**, not experimentally established optimal intervals:
+
+| Constant                   | Value | Meaning                                                           |
+| -------------------------- | ----: | ----------------------------------------------------------------- |
+| `SHORT_RETRY_GAP`          |     3 | Earliest retry after failure/heavy support/uncertainty            |
+| `CONFIRM_RETRY_GAP`        |     6 | Earliest next confirmation after successful retry                 |
+| `RETRY_WINDOW_WIDTH`       |     3 | Minimum width before reservation/collision handling               |
+| `CYCLE_STRIDE`             |     2 | Odd turns reserved for coverage; even turns available for retries |
+| `REQUIRED_RETRY_SUCCESSES` |     2 | Independent, sufficiently clear successes to finish a retry       |
+| `BOT_LOOKAHEAD`            |     3 | Near-future cycle targets protected from BOT exposure             |
+
+At answered turn `q`, earliest is `q + min(gap, N)`, where N is the number of distinct room items. Thus gap 3 means two intervening user questions. Capping the gap at N avoids deadlock in one- and two-item rooms. Success extends the gap from 3 to 6; renewed failure resets the success count and uses the short gap again. Repeated failures do not multiply the interval.
+
+Each entry reserves a distinct even `latestTurn`, starting at or after `earliestTurn + RETRY_WINDOW_WIDTH`. Collisions move the reservation to the next free even slot. Earlier service is allowed only at/after earliest. Selected entries are removed; the next answer either completes or creates a new retry obligation. Deadlines of waiting entries are never silently extended.
+
+This reservation is necessary: arbitrarily many permanently failing words cannot all have a fixed 3–7-question maximum wait while also guaranteeing new cycle questions. At most N entries exist. The hard maximum from the triggering answer is:
+
+`min(gap, N) + RETRY_WINDOW_WIDTH + CYCLE_STRIDE × N` user questions.
+
+For one failure in a 20-word room at Q1, the initial window is Q4–Q8 (Q7 rounds to an even reservation). Queue congestion can widen the maximum, but a finite bound is assigned immediately, and each odd turn remains available for coverage. In the first cycle, every word is reached within at most `2 × N` user questions even with failures; all-fast success needs exactly N. The tests check every outstanding deadline on every simulated turn, not merely eventual completion.
+
+## Evidence and memory
+
+Observations retain final correctness, first-attempt correctness, incorrect-character count, initial/final cue ratios, additional hints, full-answer reveal, latency to first key, elapsed answer time, and time since the previous answer exposure **at prompt presentation**. A long answer duration cannot retrospectively erase a BOT preview.
+
+| Observation                                         | Memory evidence                   | Session retry                       |
+| --------------------------------------------------- | --------------------------------- | ----------------------------------- |
+| Fast, correct, unaided, no errors                   | strong recall                     | none                                |
+| One promptly corrected typo / ordinary clear answer | recall                            | none                                |
+| Slow or multiple errors / light hints               | weak recall                       | confirmation                        |
+| Cue ratio ≥ 0.4                                     | weak recall                       | short                               |
+| Incorrect final answer / full answer revealed       | insufficient evidence             | short                               |
+| Answer exposed less than 3 seconds before prompt    | insufficient independent evidence | confirmation; never a retry success |
+
+The fast threshold is first key within 2.5 seconds and total time ≤ 2 seconds + 1.5 × expected typing time. Ordinary recall allows ≤ 1 incorrect input and ≤ 6 seconds + 2 × expected typing time. Expected typing time uses answer length and the user's sampled character interval (220 ms initially). Hints start at zero on every probe, then escalate after a 4-second stall through 20/40/70/100%. Full reveal pauses bomb pressure. These thresholds and cue ratios are product hypotheses.
+
+The long-term model is **not FSRS**. `R = exp(-elapsedDays / S)` makes S the days until predicted retrievability is approximately 36.8%. Fast and ordinary clear recalls use the same conservative stability gain; speed primarily reduces session repetition. A corrected typo receives no failure penalty. An unsuccessful final answer or full reveal uses `S × 0.8`, bounded below by 0.12. Recent-exposure successes do not increase S or shift the last independently evaluated review date. Coefficients are not fitted to human retention data.
+
+## BOT and saving
+
+BOT candidates must have been answered by the user this session. Pending retries and the next three cycle targets are excluded. Candidates with fewer BOT presentations are preferred, with random ties and avoidance of the previous BOT item when possible. If none is safe, skip the BOT turn. BOT start/completion update `lastPresentedAt` through the normal save queue; they do not increment review count, user-answer counters, cycle progress, retry successes, or the user question index.
+
+The existing 300 ms debounced save, serialized writes, 5-second retry, online/page-hide handling, and authenticated-user/room local unsent queue remain. No database migration is required. `playground_item_recalled` includes incorrect input count, first-attempt correctness, cue evidence, timing, exposure gap, selection reason/turn/cycle, retry window, memory evidence, retry need, independence, and model version. Keystroke strings are not stored.
+
+## Validation and limits
+
+Run `npm --prefix client run test:playground` from the repository root. Simulations cover 20/100 fast-correct words across 20 seeds, one failing word, simultaneous permanent failures in 1/2/3/4/8/20/100-item rooms, 30 mixed 500-question runs, all-graduated sets across repeated cycles, BOT invariants, confirmation/re-failure, corrected typos, real Client callbacks, real InputView Backspace callbacks, and concurrent/failed saving. The actual callback tests run source-extracted functions with state/clock/network mocks; they are not an authenticated full-browser E2E test.
+
+A browser reload starts a new shuffle cycle; long-term memory and queued unsent writes persist, but the session retry queue does not. Mid-answer typing is not a completed observation. Game restarts in the same mounted session retain the scheduler.
+
+Passing software tests establishes these implementation invariants, **not improved human retention**. Validate learning effects with delayed unaided recall (for example at 24 hours and seven days), matched learning time, and calibrated recall predictions. Turn gaps, retry windows, speed thresholds, and the memory coefficients remain product hypotheses.

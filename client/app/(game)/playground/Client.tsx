@@ -12,20 +12,23 @@ import posthog from "posthog-js";
 import { advanceBombClock } from "@/lib/playground/bomb-clock";
 import {
     applyRecallObservation,
-    chooseNextItem,
     createTurnPlan,
     shouldRecommendStop,
-    restoreSessionLearning,
-    persistSessionLearning,
-    updateSessionLearning as advanceSessionLearning,
-    getReviewContext,
+    evaluateRecall,
+    recordAnswerExposure,
     MEMORY_MODEL_VERSION,
-    MAX_ACTIVE_LEARNING_ITEMS,
     type ItemMemoryState,
     type RecallObservation,
     type RecallProgress,
-    type SessionLearningState,
 } from "@/lib/playground/memory";
+import {
+    createScheduler,
+    chooseNextUserItem,
+    chooseBotItem,
+    recordUserAnswer,
+    recordBotPresentation,
+    type SchedulerState,
+} from "@/lib/playground/scheduler";
 import {
     loadPlaygroundMemory,
     syncPlaygroundMemory,
@@ -77,11 +80,9 @@ export default function Client({
     const memoryByItemRef = useRef<Record<string, ItemMemoryState>>({});
     const pendingMemoryRef = useRef(new Map<string, ItemMemoryState>());
     const syncInFlightRef = useRef<Promise<void> | null>(null);
-    const currentReviewContextRef = useRef<"scheduled" | "early_extra">(
-        "scheduled",
-    );
-    const lastPresentedTurnRef = useRef<Record<string, number>>({});
-    const previousPresentationTurnRef = useRef<number | undefined>(undefined);
+    const schedulerRef = useRef<SchedulerState | null>(null);
+    const exposureGapAtStartRef = useRef<number | null>(null);
+    const expectedTypingAtStartRef = useRef(0);
     const [saveError, setSaveError] = useState(false);
     const authenticatedUserIdRef = useRef<string | null>(null);
     const [memoryReady, setMemoryReady] = useState(false);
@@ -104,11 +105,6 @@ export default function Client({
     const [stopRecommended, setStopRecommended] = useState(false);
     const [recallPressurePaused, setRecallPressurePaused] = useState(false);
 
-    const recentItemIdsRef = useRef<string[]>([]);
-    const sessionByItemRef = useRef<Record<string, SessionLearningState>>({});
-    const [sessionByItem, setSessionByItem] = useState<
-        Record<string, SessionLearningState>
-    >({});
     const sessionTurnNumberRef = useRef(0);
     const [itemPresentationKey, setItemPresentationKey] = useState(0);
     const recallProgressRef = useRef<RecallProgress | null>(null);
@@ -221,75 +217,62 @@ export default function Client({
         };
     }, [room.id, router, items]);
 
-    const setTrackedItem = useCallback((item: Item | null) => {
-        currentItemRef.current = item;
-        setCurrentItem(item);
-        recallProgressRef.current = null;
-        setRecallPressurePaused(false);
-
-        if (item) {
-            sessionTurnNumberRef.current += 1;
-            setItemPresentationKey(sessionTurnNumberRef.current);
-            recentItemIdsRef.current = [
-                ...recentItemIdsRef.current,
-                item.id,
-            ].slice(-12);
-
-            const isLocalTurn =
-                usersRef.current[currentTurnRef.current]?.id === LOCAL_USER_ID;
-            const memory = memoryByItemRef.current[item.id];
-
-            const previousExposure = lastPresentedTurnRef.current[item.id];
-            const currentSession = sessionByItemRef.current[item.id];
-            const phase = currentSession?.phase ?? memory?.learningState?.phase;
-            previousPresentationTurnRef.current = previousExposure;
-            currentReviewContextRef.current = getReviewContext(
-                memory,
-                phase,
-                previousExposure,
-                sessionTurnNumberRef.current,
-            );
-            lastPresentedTurnRef.current[item.id] =
-                sessionTurnNumberRef.current;
-
-            if (isLocalTurn && (!currentSession || currentSession.deferred)) {
-                sessionByItemRef.current = {
-                    ...sessionByItemRef.current,
-                    [item.id]: {
-                        ...(currentSession ??
-                            restoreSessionLearning(
-                                memory,
-                                sessionTurnNumberRef.current,
-                            )),
-                        deferred: false,
-                        practiceAttempts: 0,
-                    },
-                };
-                setSessionByItem(sessionByItemRef.current);
-            } else if (!isLocalTurn && currentSession) {
-                // Seeing a BOT type the answer is exposure, even though it is not a user review.
-                sessionByItemRef.current = {
-                    ...sessionByItemRef.current,
-                    [item.id]: {
-                        ...currentSession,
-                        lastSeenTurn: sessionTurnNumberRef.current,
-                    },
-                };
-                setSessionByItem(sessionByItemRef.current);
-            }
-        }
+    const saveBotExposure = useCallback((item: Item) => {
+        const memory = memoryByItemRef.current[item.id];
+        if (!memory) return;
+        const exposed = recordAnswerExposure(memory);
+        memoryByItemRef.current = {
+            ...memoryByItemRef.current,
+            [item.id]: exposed,
+        };
+        pendingMemoryRef.current.set(item.id, exposed);
+        setMemoryByItem(memoryByItemRef.current);
     }, []);
 
+    const setTrackedItem = useCallback(
+        (item: Item | null) => {
+            currentItemRef.current = item;
+            setCurrentItem(item);
+            recallProgressRef.current = null;
+            setRecallPressurePaused(false);
+            if (!item) return;
+            sessionTurnNumberRef.current += 1;
+            setItemPresentationKey(sessionTurnNumberRef.current);
+            const local =
+                usersRef.current[currentTurnRef.current]?.id === LOCAL_USER_ID;
+            if (local) {
+                const memory = memoryByItemRef.current[item.id];
+                const exposure =
+                    memory?.lastPresentedAt ?? memory?.lastReviewedAt;
+                // Measure before answering: a long typing delay does not undo a BOT preview.
+                exposureGapAtStartRef.current = exposure
+                    ? Math.max(0, Date.now() - Date.parse(exposure))
+                    : null;
+                expectedTypingAtStartRef.current =
+                    item.answer.length * userTypingDelayRef.current;
+            } else {
+                if (schedulerRef.current)
+                    recordBotPresentation(schedulerRef.current, item.id);
+                saveBotExposure(item);
+            }
+        },
+        [saveBotExposure],
+    );
+
     const chooseItemForTurn = useCallback(
-        (turnIndex: number) =>
-            chooseNextItem({
-                items,
-                memoryByItem: memoryByItemRef.current,
-                recentItemIds: recentItemIdsRef.current,
-                activeRecall: usersRef.current[turnIndex]?.id === LOCAL_USER_ID,
-                sessionByItem: sessionByItemRef.current,
-                currentTurnNumber: sessionTurnNumberRef.current,
-            }),
+        (turnIndex: number) => {
+            const scheduler =
+                schedulerRef.current ??
+                (schedulerRef.current = createScheduler(
+                    items.map((item) => item.id),
+                ));
+            const id =
+                usersRef.current[turnIndex]?.id === LOCAL_USER_ID
+                    ? chooseNextUserItem(scheduler, memoryByItemRef.current)
+                          ?.itemId
+                    : chooseBotItem(scheduler);
+            return items.find((item) => item.id === id) ?? null;
+        },
         [items],
     );
 
@@ -393,49 +376,36 @@ export default function Client({
             const userId = authenticatedUserIdRef.current;
             if (!userId) return;
 
-            const currentSession =
-                sessionByItemRef.current[item.id] ??
-                restoreSessionLearning(
-                    memoryByItemRef.current[item.id],
-                    sessionTurnNumberRef.current,
-                );
-            const nextSession = advanceSessionLearning(
-                currentSession,
-                observation,
-                sessionTurnNumberRef.current,
-            );
-            const sessions = { ...sessionByItemRef.current };
-            if (
-                nextSession.phase !== "graduated" &&
-                currentSession.phase === "graduated"
-            ) {
-                const active = Object.entries(sessions).filter(
-                    ([id, state]) =>
-                        id !== item.id &&
-                        state.phase !== "graduated" &&
-                        !state.deferred,
-                );
-                if (active.length >= MAX_ACTIVE_LEARNING_ITEMS) {
-                    active.sort(
-                        (a, b) => a[1].lastSeenTurn - b[1].lastSeenTurn,
-                    );
-                    // Its persisted state remains available when it is admitted again.
-                    delete sessions[active[0][0]];
-                }
-            }
-            sessionByItemRef.current = { ...sessions, [item.id]: nextSession };
-            setSessionByItem(sessionByItemRef.current);
-
-            const nextMemory = {
-                ...applyRecallObservation({
-                    memory: memoryByItemRef.current[item.id],
-                    observation,
-                    userId,
-                    roomId: room.id,
-                    itemId: item.id,
-                }),
-                learningState: persistSessionLearning(nextSession),
+            const scheduler = schedulerRef.current;
+            const selected = scheduler?.current;
+            const evidence: RecallObservation = {
+                ...observation,
+                incorrectInputCount:
+                    observation.incorrectInputCount ??
+                    Math.max(0, observation.attemptCount - 1),
+                initialCueRatio: observation.initialCueRatio ?? 0,
+                additionalHintCount:
+                    observation.additionalHintCount ?? observation.hintCount,
+                finalCueRatio:
+                    observation.finalCueRatio ??
+                    observation.revealedHintChars /
+                        Math.max(1, observation.answerLength),
+                answerWasFullyRevealed:
+                    observation.answerWasFullyRevealed ??
+                    observation.revealedHintChars >= observation.answerLength,
+                elapsedSincePresentationMs: exposureGapAtStartRef.current,
+                expectedTypingMs: expectedTypingAtStartRef.current,
+                schedulerReason: selected?.reason ?? "cycle",
             };
+            const evaluation = evaluateRecall(evidence);
+            if (scheduler) recordUserAnswer(scheduler, evaluation);
+            const nextMemory = applyRecallObservation({
+                memory: memoryByItemRef.current[item.id],
+                observation: evidence,
+                userId,
+                roomId: room.id,
+                itemId: item.id,
+            });
 
             const nextMemoryByItem = {
                 ...memoryByItemRef.current,
@@ -451,22 +421,33 @@ export default function Client({
                 room_id: room.id,
                 item_id: item.id,
                 success: observation.success,
+                correct: observation.success,
+                source: "user",
+                expected_typing_ms: evidence.expectedTypingMs,
                 model_version: MEMORY_MODEL_VERSION,
-                review_context: observation.reviewContext,
+                scheduler_reason: evidence.schedulerReason,
+                scheduler_turn: selected?.turn,
+                scheduler_cycle: selected?.cycle,
+                retry_earliest_turn: selected?.retry?.earliestTurn,
+                retry_latest_turn: selected?.retry?.latestTurn,
+                memory_evidence: evaluation.memoryEvidence,
+                retry_need: evaluation.retryNeed,
+                independent_recall: evaluation.independent,
+                first_attempt_correct: evidence.firstAttemptCorrect,
+                incorrect_input_count: evidence.incorrectInputCount,
+                answer_was_fully_revealed: evidence.answerWasFullyRevealed,
                 elapsed_ms: observation.elapsedMs,
                 elapsed_since_presentation_ms:
-                    observation.elapsedSincePresentationMs,
-                initial_cue_ratio: observation.initialCueRatio,
-                additional_hint_count: observation.additionalHintCount,
+                    evidence.elapsedSincePresentationMs,
+                initial_cue_ratio: evidence.initialCueRatio,
+                additional_hint_count: evidence.additionalHintCount,
                 recall_latency_ms: observation.recallLatencyMs,
                 hint_count: observation.hintCount,
                 revealed_hint_chars: observation.revealedHintChars,
                 max_correct_prefix_length: observation.maxCorrectPrefixLength,
                 attempt_count: observation.attemptCount,
                 recall_outcome: observation.outcome,
-                final_cue_ratio: observation.finalCueRatio,
-                session_phase_after:
-                    sessionByItemRef.current[item.id]?.phase ?? "long_term",
+                final_cue_ratio: evidence.finalCueRatio,
                 stability_after: nextMemory.stability,
                 difficulty_after: nextMemory.difficulty,
             });
@@ -584,21 +565,7 @@ export default function Client({
                 return;
             }
 
-            const context = getReviewContext(
-                memoryByItemRef.current[item.id],
-                sessionByItemRef.current[item.id]?.phase,
-                previousPresentationTurnRef.current,
-                sessionTurnNumberRef.current,
-            );
-            const lastExposure =
-                memoryByItemRef.current[item.id]?.lastPresentedAt;
-            updateLocalMemory(item, {
-                ...observation,
-                reviewContext: context,
-                elapsedSincePresentationMs: lastExposure
-                    ? Math.max(0, Date.now() - Date.parse(lastExposure))
-                    : undefined,
-            });
+            updateLocalMemory(item, observation);
         },
         [updateLocalMemory],
     );
@@ -637,21 +604,7 @@ export default function Client({
             presentedItem &&
             usersRef.current[currentTurnRef.current]?.id !== LOCAL_USER_ID
         ) {
-            const memory = memoryByItemRef.current[presentedItem.id];
-            if (memory) {
-                const now = new Date().toISOString();
-                const exposed = {
-                    ...memory,
-                    lastPresentedAt: now,
-                    updatedAt: now,
-                };
-                memoryByItemRef.current = {
-                    ...memoryByItemRef.current,
-                    [presentedItem.id]: exposed,
-                };
-                pendingMemoryRef.current.set(presentedItem.id, exposed);
-                setMemoryByItem(memoryByItemRef.current);
-            }
+            saveBotExposure(presentedItem);
         }
         setCurrentInput("");
         previousInputAtRef.current = null;
@@ -669,6 +622,7 @@ export default function Client({
         });
     }, [
         initialSounDeffects,
+        saveBotExposure,
         resolveTurnWithItem,
         room.id,
         setTrackedItem,
@@ -682,11 +636,8 @@ export default function Client({
             return null;
         }
 
-        return createTurnPlan(
-            memoryByItem[currentItem.id],
-            sessionByItem[currentItem.id],
-        );
-    }, [currentItem, currentTurnUser?.id, memoryByItem, sessionByItem]);
+        return createTurnPlan(memoryByItem[currentItem.id]);
+    }, [currentItem, currentTurnUser?.id, memoryByItem]);
 
     useEffect(() => {
         bombPlanRef.current = {
@@ -742,14 +693,10 @@ export default function Client({
                         success: false,
                         answerLength: item.answer.length,
                         firstAttemptCorrect: false,
-                        reviewContext: currentReviewContextRef.current,
                     });
                 }
 
                 const recommendStop = shouldRecommendStop({
-                    items,
-                    memoryByItem: memoryByItemRef.current,
-                    userReviewCount: userReviewCountRef.current,
                     sessionStartedAt: sessionStartedAtRef.current,
                 });
 

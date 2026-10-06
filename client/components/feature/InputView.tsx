@@ -81,6 +81,7 @@ function TypingAttempt({
     const recallStartedAtRef = useRef(0);
     const firstKeyAtRef = useRef<number | null>(null);
     const attemptCountRef = useRef(1);
+    const incorrectInputCountRef = useRef(0);
     const maxCorrectPrefixRef = useRef(0);
     const lastCorrectProgressAtRef = useRef(0);
     const cueStepsKey = cueSteps.join(",");
@@ -98,6 +99,7 @@ function TypingAttempt({
         recallStartedAtRef.current = performance.now();
         firstKeyAtRef.current = null;
         attemptCountRef.current = 1;
+        incorrectInputCountRef.current = 0;
         maxCorrectPrefixRef.current = 0;
     }, [english, isReadonly, wordKey]);
 
@@ -258,6 +260,7 @@ function TypingAttempt({
 
         onRecallProgress?.({
             attemptCount: attemptCountRef.current,
+            incorrectInputCount: incorrectInputCountRef.current,
             hintCount,
             revealedHintChars: hintLength,
             maxCorrectPrefixLength: maxCorrectPrefixRef.current,
@@ -278,6 +281,9 @@ function TypingAttempt({
     if (!english) return null;
 
     const moveToNext = (next: string[]) => {
+        // Record the incorrect character when entered, before Backspace/reset can erase it.
+        if (next[currentSelection] !== english[currentSelection])
+            incorrectInputCountRef.current += 1;
         const nextIndex = currentSelection + 1;
         const nextCorrectPrefixLength = correctPrefixLength(next, english);
         if (nextCorrectPrefixLength > maxCorrectPrefixRef.current) {
@@ -315,9 +321,13 @@ function TypingAttempt({
                     finalCueRatio,
                     initialCueRatio,
                     additionalHintCount: timedHintCount,
+                    answerWasFullyRevealed: hintLength >= english.length,
                     firstAttemptCorrect:
-                        attemptCountRef.current === 1 && hintCount === 0,
+                        attemptCountRef.current === 1 &&
+                        incorrectInputCountRef.current === 0 &&
+                        hintLength === 0,
                     attemptCount: attemptCountRef.current,
+                    incorrectInputCount: incorrectInputCountRef.current,
                     hintCount,
                     revealedHintChars: hintLength,
                     maxCorrectPrefixLength: maxCorrectPrefixRef.current,
