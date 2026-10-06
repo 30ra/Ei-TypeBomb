@@ -14,10 +14,18 @@ export type RecallProgress = {
     elapsedMs: number;
 };
 
+export type RecallOutcome =
+    | "encoding"
+    | "free_recall"
+    | "cued_recall"
+    | "relearned";
+
 export type RecallObservation = RecallProgress & {
     success: boolean;
     answerLength: number;
     firstAttemptCorrect: boolean;
+    outcome?: RecallOutcome;
+    finalCueRatio?: number;
 };
 
 export type ItemMemoryState = {
@@ -32,14 +40,29 @@ export type ItemMemoryState = {
     updatedAt?: string | null;
 };
 
+export type LearningMode =
+    | "encoding"
+    | "supported_recall"
+    | "free_recall"
+    | "relearning";
+
 export type TurnPlan = {
+    mode: LearningMode;
     retrievalWindowMs: number;
-    hintIntervalsMs: number[];
     retrievability: number;
     difficulty: number;
+    initialCueRatio: number;
+    cueSteps: number[];
+    stallMs: number | null;
+    bombPressure: "paused" | "low" | "normal";
+    countsAsRecall: boolean;
 };
 
-const BASE_HINT_INTERVALS_MS = [6_000, 4_000, 3_000, 2_500];
+const INITIAL_ENCODING_STABILITY = 0.15;
+const RELEARNING_ENCODING_GAIN = 0.15;
+const FAILURE_PENALTY = 0.55;
+const LOW_CUE_THRESHOLD = 0.2;
+const CUE_STEPS = [0.2, 0.4, 0.7, 1] as const;
 
 export const toMemoryState = (row: {
     user_id: string;
@@ -111,63 +134,83 @@ export const applyRecallObservation = ({
         memory ?? createInitialMemory(userId, roomId, itemId);
     const retrievability = getRetrievability(current, now.getTime());
     const difficulty = clamp(current.difficulty, 1, 10);
-    const difficultyNormalized = (difficulty - 1) / 9;
-    const hintBurden = clamp(
-        observation.hintCount /
-            Math.max(1, Math.ceil(observation.answerLength / 3)),
+    const finalCueRatio = clamp(
+        observation.finalCueRatio ??
+            observation.revealedHintChars /
+                Math.max(1, observation.answerLength),
         0,
         1,
     );
-    const prefixRatio = clamp(
-        observation.maxCorrectPrefixLength /
-            Math.max(1, observation.answerLength),
-        0,
-        1,
-    );
-    const latencyPenalty =
-        observation.recallLatencyMs === null
-            ? 0
-            : clamp((observation.recallLatencyMs - 3_000) / 12_000, 0, 1);
+    const outcome: RecallOutcome =
+        observation.outcome ??
+        (current.reviewCount === 0
+            ? "encoding"
+            : observation.success
+              ? finalCueRatio === 0
+                  ? "free_recall"
+                  : finalCueRatio >= 1
+                    ? "relearned"
+                    : "cued_recall"
+              : "relearned");
 
     let stability = current.stability;
     let nextDifficulty = difficulty;
 
-    if (observation.success) {
-        const quality = clamp(
-            1 -
-                hintBurden * 0.55 -
-                latencyPenalty * 0.15 +
-                prefixRatio * 0.1,
-            0.2,
+    if (outcome === "encoding") {
+        stability = Math.max(
+            current.reviewCount === 0
+                ? INITIAL_ENCODING_STABILITY
+                : current.stability,
+            INITIAL_ENCODING_STABILITY,
+        );
+        nextDifficulty = difficulty;
+    } else if (outcome === "relearned" || !observation.success) {
+        stability = Math.max(
+            0.12,
+            current.stability * FAILURE_PENALTY +
+                RELEARNING_ENCODING_GAIN,
+        );
+        nextDifficulty = clamp(difficulty + 0.7, 1, 10);
+    } else {
+        const recallWeight =
+            finalCueRatio === 0
+                ? 1
+                : finalCueRatio <= LOW_CUE_THRESHOLD
+                  ? 0.7
+                  : finalCueRatio <= 0.4
+                    ? 0.45
+                    : finalCueRatio <= 0.7
+                      ? 0.2
+                      : 0.05;
+        const spacingGain = 0.55 + (1 - retrievability) * 1.45;
+        const difficultyDrag =
+            1 - ((difficulty - 1) / 9) * 0.25;
+        const attemptPenalty = clamp(
+            1 - (observation.attemptCount - 1) * 0.12,
+            0.55,
             1,
         );
-        const spacingGain = 0.7 + (1 - retrievability) * 1.6;
-        const difficultyDrag = 1 - difficultyNormalized * 0.25;
 
-        if (current.reviewCount === 0) {
-            stability = 0.45 + quality * 0.75;
-        } else {
-            stability = Math.max(
-                0.12,
-                stability *
-                    (1 + spacingGain * quality * difficultyDrag),
-            );
-        }
+        stability = Math.max(
+            0.12,
+            current.stability *
+                (1 +
+                    spacingGain *
+                        recallWeight *
+                        difficultyDrag *
+                        attemptPenalty),
+        );
 
         nextDifficulty = clamp(
             difficulty +
-                hintBurden * 0.6 +
-                latencyPenalty * 0.25 -
-                (observation.firstAttemptCorrect &&
-                observation.hintCount === 0
+                (1 - recallWeight) * 0.35 -
+                (outcome === "free_recall" &&
+                observation.firstAttemptCorrect
                     ? 0.35
                     : 0),
             1,
             10,
         );
-    } else {
-        stability = Math.max(0.12, stability * 0.6);
-        nextDifficulty = clamp(difficulty + 0.8, 1, 10);
     }
 
     const isoNow = now.toISOString();
@@ -184,7 +227,6 @@ export const applyRecallObservation = ({
         updatedAt: isoNow,
     };
 };
-
 export const getItemPriority = ({
     item,
     memory,
@@ -266,32 +308,66 @@ export const createTurnPlan = (
 ): TurnPlan => {
     const retrievability = getRetrievability(memory);
     const difficulty = memory?.difficulty ?? 5;
-    const difficultyNormalized = (difficulty - 1) / 9;
-    const supportNeed =
-        (1 - retrievability) * 0.55 + difficultyNormalized * 0.45;
 
-    const timingScale = clamp(0.9 + supportNeed * 0.25, 0.9, 1.15);
-    const hintIntervalsMs = BASE_HINT_INTERVALS_MS.map((interval) =>
-        Math.round(interval * timingScale),
-    );
-    const retrievalWindowMs = Math.round(
-        clamp(
-            15_000 +
-                difficultyNormalized * 5_000 +
-                (1 - retrievability) * 3_000,
-            15_000,
-            24_000,
-        ),
-    );
+    if (!memory || memory.reviewCount === 0) {
+        return {
+            mode: "encoding",
+            retrievalWindowMs: 0,
+            retrievability: 0,
+            difficulty,
+            initialCueRatio: 1,
+            cueSteps: [1],
+            stallMs: null,
+            bombPressure: "paused",
+            countsAsRecall: false,
+        };
+    }
+
+    if (retrievability < 0.35) {
+        return {
+            mode: "relearning",
+            retrievalWindowMs: 24_000,
+            retrievability,
+            difficulty,
+            initialCueRatio: 0.6,
+            cueSteps: [0.7, 1],
+            stallMs: 2_500,
+            bombPressure: "low",
+            countsAsRecall: true,
+        };
+    }
+
+    if (memory.reviewCount <= 2 || retrievability < 0.72) {
+        const initialCueRatio =
+            memory.reviewCount <= 1 ? 0.5 : 0.2;
+
+        return {
+            mode: "supported_recall",
+            retrievalWindowMs: 22_000,
+            retrievability,
+            difficulty,
+            initialCueRatio,
+            cueSteps: CUE_STEPS.filter(
+                (ratio) => ratio > initialCueRatio,
+            ),
+            stallMs: 2_500,
+            bombPressure: "low",
+            countsAsRecall: true,
+        };
+    }
 
     return {
-        retrievalWindowMs,
-        hintIntervalsMs,
+        mode: "free_recall",
+        retrievalWindowMs: 18_000,
         retrievability,
         difficulty,
+        initialCueRatio: 0,
+        cueSteps: [...CUE_STEPS],
+        stallMs: 4_000,
+        bombPressure: "normal",
+        countsAsRecall: true,
     };
 };
-
 export const getAdaptiveBombStageDurationMs = ({
     items,
     memoryByItem,
@@ -305,6 +381,7 @@ export const getAdaptiveBombStageDurationMs = ({
         .map((item) =>
             createTurnPlan(memoryByItem[item.id]).retrievalWindowMs,
         )
+        .filter((duration) => duration > 0)
         .sort((a, b) => a - b);
     const median =
         durations[Math.floor(durations.length / 2)] ?? 18_000;
