@@ -46,7 +46,7 @@ type Props = {
     learningMode?: LearningMode;
     initialCueRatio?: number;
     cueSteps?: number[];
-    stallMs?: number | null;
+    hintDelaysMs?: number | null;
     onRecallProgress?: (progress: RecallProgress) => void;
     onRecallComplete?: (observation: RecallObservation) => void;
     stopRecommended?: boolean;
@@ -84,7 +84,7 @@ export default function GameView({
     learningMode,
     initialCueRatio,
     cueSteps,
-    stallMs,
+    hintDelaysMs,
     onRecallProgress,
     onRecallComplete,
     stopRecommended = false,
@@ -150,7 +150,7 @@ export default function GameView({
                     learningMode={learningMode}
                     initialCueRatio={initialCueRatio}
                     cueSteps={cueSteps}
-                    stallMs={stallMs}
+                    hintDelaysMs={hintDelaysMs}
                     onRecallProgress={onRecallProgress}
                     onRecallComplete={onRecallComplete}
                 />
