@@ -112,9 +112,10 @@ function TypingAttempt({
         lastCorrectProgressAtRef.current = performance.now();
         lastHintAtRef.current = 0;
 
+        const activeHintDelays = hintDelaysMs;
         if (
-            hintDelaysMs === null ||
-            hintDelaysMs.length === 0 ||
+            activeHintDelays === null ||
+            activeHintDelays.length === 0 ||
             initialCueRatio >= 1
         )
             return;
@@ -126,8 +127,8 @@ function TypingAttempt({
         const getHintDelay = () =>
             Math.max(
                 250,
-                hintDelaysMs[
-                    Math.min(hintIndex, hintDelaysMs.length - 1)
+                activeHintDelays[
+                    Math.min(hintIndex, activeHintDelays.length - 1)
                 ] ?? 250,
             );
 
