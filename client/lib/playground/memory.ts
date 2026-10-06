@@ -240,7 +240,12 @@ export const chooseNextItem = ({
     if (items.length === 0) return null;
     if (items.length === 1) return items[0];
 
-    const ranked = items
+    const cooldown = new Set(recentItemIds.slice(-3));
+    const availableItems = items.some((item) => !cooldown.has(item.id))
+        ? items.filter((item) => !cooldown.has(item.id))
+        : items;
+
+    const ranked = availableItems
         .map((item) => ({
             item,
             score: getItemPriority({
@@ -253,11 +258,7 @@ export const chooseNextItem = ({
             activeRecall ? b.score - a.score : a.score - b.score,
         );
 
-    const nonImmediateRepeat = ranked.find(
-        ({ item }) => item.id !== recentItemIds.at(-1),
-    );
-
-    return nonImmediateRepeat?.item ?? ranked[0]?.item ?? null;
+    return ranked[0]?.item ?? null;
 };
 
 export const createTurnPlan = (
