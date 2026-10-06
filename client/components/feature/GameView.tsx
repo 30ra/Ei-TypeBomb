@@ -6,6 +6,7 @@ import UsersView from "@/components/feature/UsersView";
 import Button from "@/components/ui/Button";
 import type { Item, Position, Room, User } from "@/type";
 import type {
+    LearningMode,
     RecallObservation,
     RecallProgress,
 } from "@/lib/playground/memory";
@@ -41,7 +42,10 @@ type Props = {
     onStartGame?: () => void;
     onLeave?: () => void;
     enableRemoteTypingSync?: boolean;
-    hintIntervalsMs?: number[];
+    learningMode?: LearningMode;
+    initialCueRatio?: number;
+    cueSteps?: number[];
+    stallMs?: number | null;
     onRecallProgress?: (progress: RecallProgress) => void;
     onRecallComplete?: (observation: RecallObservation) => void;
     stopRecommended?: boolean;
@@ -75,7 +79,10 @@ export default function GameView({
     onStartGame,
     onLeave,
     enableRemoteTypingSync = true,
-    hintIntervalsMs,
+    learningMode,
+    initialCueRatio,
+    cueSteps,
+    stallMs,
     onRecallProgress,
     onRecallComplete,
     stopRecommended = false,
@@ -137,7 +144,10 @@ export default function GameView({
                               : currentInput
                     }
                     enableRemoteTypingSync={enableRemoteTypingSync}
-                    hintIntervalsMs={hintIntervalsMs}
+                    learningMode={learningMode}
+                    initialCueRatio={initialCueRatio}
+                    cueSteps={cueSteps}
+                    stallMs={stallMs}
                     onRecallProgress={onRecallProgress}
                     onRecallComplete={onRecallComplete}
                 />
