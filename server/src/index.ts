@@ -43,7 +43,7 @@ const validateDisplayName = (displayName: unknown): string => {
 const requireRoomItems = (room: Room) => {
     if (!room.items?.length) {
         throw new ClientError(
-            "ルームに単語が設定されていません。単語を設定してから再度お試しください。",
+            "ルームに問題が設定されていません。問題を設定してから再度お試しください。",
         );
     }
 };
