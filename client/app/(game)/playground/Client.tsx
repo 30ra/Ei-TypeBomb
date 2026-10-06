@@ -263,6 +263,36 @@ export default function Client({
         [items],
     );
 
+    const resolveTurnWithItem = useCallback(
+        (requestedTurnIndex: number) => {
+            const requestedItem = chooseItemForTurn(
+                requestedTurnIndex,
+            );
+            if (requestedItem) {
+                return {
+                    turnIndex: requestedTurnIndex,
+                    item: requestedItem,
+                };
+            }
+
+            const localTurnIndex = usersRef.current.findIndex(
+                (user) => user.id === LOCAL_USER_ID,
+            );
+            if (localTurnIndex < 0) {
+                return {
+                    turnIndex: requestedTurnIndex,
+                    item: null,
+                };
+            }
+
+            return {
+                turnIndex: localTurnIndex,
+                item: chooseItemForTurn(localTurnIndex),
+            };
+        },
+        [chooseItemForTurn],
+    );
+
     const setTrackedTurn = useCallback((turnIndex: number) => {
         currentTurnRef.current = turnIndex;
         setCurrentTurn(turnIndex);
@@ -284,18 +314,21 @@ export default function Client({
         setStopRecommended(false);
         setTrackedItem(null);
 
-        const firstTurn = Math.floor(
+        const requestedFirstTurn = Math.floor(
             Math.random() * usersRef.current.length,
         );
-        setTrackedTurn(firstTurn);
 
         countdownTimerRef.current = setTimeout(() => {
-            setTrackedItem(chooseItemForTurn(firstTurn));
+            const resolved = resolveTurnWithItem(
+                requestedFirstTurn,
+            );
+            setTrackedTurn(resolved.turnIndex);
+            setTrackedItem(resolved.item);
             countdownTimerRef.current = null;
         }, 3000);
     }, [
-        chooseItemForTurn,
         items.length,
+        resolveTurnWithItem,
         memoryReady,
         resetExplosion,
         setTrackedItem,
@@ -628,19 +661,22 @@ export default function Client({
         previousInputAtRef.current = null;
         previousInputLengthRef.current = 0;
 
-        const nextTurn =
+        const requestedNextTurn =
             (currentTurnRef.current + 1) %
             usersRef.current.length;
-        setTrackedTurn(nextTurn);
-        setTrackedItem(chooseItemForTurn(nextTurn));
+        const resolved = resolveTurnWithItem(
+            requestedNextTurn,
+        );
+        setTrackedTurn(resolved.turnIndex);
+        setTrackedItem(resolved.item);
 
         posthog.capture("word_succeeded", {
             mode: "playground",
             room_id: room.id,
         });
     }, [
-        chooseItemForTurn,
         initialSounDeffects,
+        resolveTurnWithItem,
         room.id,
         setTrackedItem,
         setTrackedTurn,
