@@ -31,6 +31,7 @@ export default function TypingView({
     currentInput,
     bombStatus,
     hasDuplicateMeaning = false,
+    enableRemoteTypingSync = true,
 }: {
     japanese: string;
     english: string | null;
@@ -39,6 +40,7 @@ export default function TypingView({
     currentInput: string | null;
     bombStatus?: number | null;
     hasDuplicateMeaning?: boolean;
+    enableRemoteTypingSync?: boolean;
 }) {
     const variant = posthog.getFeatureFlag("showWordPrefix");
     console.log("variant", variant);
@@ -79,6 +81,8 @@ export default function TypingView({
             return;
         }
 
+        if (!enableRemoteTypingSync) return;
+
         let socket: ReturnType<typeof io> | null = null;
         let cancelled = false;
 
@@ -111,7 +115,7 @@ export default function TypingView({
             socket?.disconnect();
             socket = null;
         };
-    }, [isReadonly]);
+    }, [enableRemoteTypingSync, isReadonly]);
 
     const triggerFailAnimation = () => {
         // Restart an in-flight shake without an older timer stopping it early.
@@ -174,7 +178,7 @@ export default function TypingView({
     };
 
     const displayInput = isReadonly
-        ? currentInput === ""
+        ? enableRemoteTypingSync && currentInput === ""
             ? syncedInput
             : currentInput
         : input.join("");
