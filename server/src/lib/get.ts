@@ -11,7 +11,7 @@ type RoomRow = {
     password: string | null;
     created_at: string | null;
     updated_at: string | null;
-    words: Room["words"] | null;
+    items: Room["items"] | null;
 };
 
 export const getRoomFromId = async (id: string) => {
@@ -27,7 +27,7 @@ export const getRoomFromId = async (id: string) => {
                 password,
                 created_at,
                 updated_at,
-                words
+                items
             FROM public.ei_typebomb_rooms
             WHERE id = $1
             LIMIT 1`,
@@ -47,7 +47,7 @@ export const getRoomFromId = async (id: string) => {
             password: data.password,
             createdAt: data.created_at ?? undefined,
             updatedAt: data.updated_at ?? undefined,
-            words: data.words ?? undefined,
+            items: data.items ?? undefined,
         } as Room;
     } catch (error) {
         console.error(
