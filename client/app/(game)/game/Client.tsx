@@ -11,7 +11,6 @@ import { isTrustedServerUrl, resolveServerUrl } from "@/lib/room/serverUrl";
 import { Position } from "@/type";
 import { newPositions } from "@/lib/ui/position";
 import posthog from "posthog-js";
-import { getRoomItems } from "@/lib/item";
 
 type Props = {
     initialBackgroundMusic: boolean;
@@ -246,9 +245,8 @@ export default function Clinet({
                     );
                     setIsStarted(newRoom.isStart);
                     setCurrentTurn(newRoom.bombHolder);
-                    if (newRoom.wordIndex !== undefined) {
-                        const items = getRoomItems(newRoom);
-                        setCurrentItem(items[newRoom.wordIndex] ?? null);
+                    if (newRoom.wordIndex !== undefined && newRoom.items) {
+                        setCurrentItem(newRoom.items[newRoom.wordIndex] ?? null);
                     } else {
                         setCurrentItem(null);
                     }
