@@ -13,7 +13,7 @@ import type {
 } from "@/lib/playground/memory";
 
 const DEFAULT_CUE_STEPS = [0.2, 0.4, 0.7, 1];
-const DEFAULT_HINT_DELAYS_MS = [2_000, 2_500, 3_000, 3_500];
+const DEFAULT_HINT_DELAYS_MS = [1_000, 1_500, 2_000, 2_500];
 
 const isSoundEffectsEnabled = () => {
     if (typeof document === "undefined") return true;
@@ -189,11 +189,7 @@ function TypingAttempt({
                 hintIndex += 1;
 
                 if (
-                    hintCoversError(
-                        inputStateRef.current,
-                        english,
-                        nextLength,
-                    )
+                    hintCoversError(inputStateRef.current, english, nextLength)
                 ) {
                     attemptCountRef.current += 1;
                     inputStateRef.current = Array(english.length).fill("");
