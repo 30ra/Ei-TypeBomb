@@ -1,4 +1,4 @@
-import type { Word } from "@/type";
+import type { LegacyWord } from "@/type";
 
 export const validateEmail = (email?: string) => {
     const MAX_EMAIL_LENGTH = 254;
@@ -35,7 +35,7 @@ export const validateEmail = (email?: string) => {
     return null;
 };
 
-export const validateWords = (words?: Word[]) => {
+export const validateWords = (words?: LegacyWord[]) => {
     const MAX_WORD_LENGTH = 32;
     const MAX_ARRAY_LENGTH = 512;
 
