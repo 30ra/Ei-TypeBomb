@@ -12,8 +12,8 @@ const secret = new TextEncoder().encode('test-only-secret');
 const token = (id = roomId, expiry = '1h') =>
 	new SignJWT({ id }).setProtectedHeader({ alg: 'HS256' }).setExpirationTime(expiry).sign(secret);
 const responses: unknown[] = [];
-function mockRoom(words: unknown = [{ jp: '猫', en: 'cat' }]) {
-	responses.push([{ id: roomId, title: 'Test', max_players: 2, game_duration: 1000, words, password: 'must-not-leak' }]);
+function mockRoom(items: unknown = [{ id: 'item-1', type: 'typed_recall', prompt: '猫', answer: 'cat' }]) {
+	responses.push([{ id: roomId, title: 'Test', max_players: 2, game_duration: 1000, items, password: 'must-not-leak' }]);
 }
 async function connect(id = roomId) {
 	const response = await SELF.fetch(`https://worker.test/ws/${id}`, { headers: { Upgrade: 'websocket', Origin: 'http://localhost:3000' } });
@@ -287,13 +287,13 @@ it('removes idle players and expires unauthenticated sockets', async () => {
 	expect(await runInDurableObject(stub, (_, ctx) => ctx.storage.get('game'))).toBeUndefined();
 });
 
-it('rejects empty word lists without authenticating the socket', async () => {
+it('rejects empty item lists without authenticating the socket', async () => {
 	mockRoom([]);
 	const a = await connect();
 	a.send('auth:response', { jwtToken: await token(), displayName: 'Player' });
 	expect(await a.next<{ message: string }>('error')).toHaveProperty(
 		'message',
-		'ルームに単語が設定されていません。単語を設定してから再度お試しください。',
+		'ルームに問題が設定されていません。問題を設定してから再度お試しください。',
 	);
 	const stub = env.GAME_ROOMS.getByName(roomId);
 	expect(
