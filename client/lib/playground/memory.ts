@@ -44,7 +44,7 @@ const BASE_HINT_INTERVALS_MS = [6_000, 4_000, 3_000, 2_500];
 export const toMemoryState = (row: {
     user_id: string;
     room_id: string;
-    item_id: string;
+    id: string;
     stability: number;
     difficulty: number;
     review_count: number;
@@ -54,7 +54,7 @@ export const toMemoryState = (row: {
 }): ItemMemoryState => ({
     userId: row.user_id,
     roomId: row.room_id,
-    itemId: row.item_id,
+    itemId: row.id,
     stability: Math.max(0.12, Number(row.stability) || 0.35),
     difficulty: clamp(Number(row.difficulty) || 5, 1, 10),
     reviewCount: Math.max(0, Number(row.review_count) || 0),
