@@ -65,6 +65,7 @@ export type SessionLearningState = {
     lastSeenTurn: number;
     lastCueRatio: number;
     relearningSinceLastFreeRecall: boolean;
+    cueSuccessStreak: number;
 };
 
 const INITIAL_ENCODING_STABILITY = 0.15;
