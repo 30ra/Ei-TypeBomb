@@ -1,5 +1,9 @@
 import TypingView from "@/components/feature/InputView";
 import type { TypedRecallItem } from "@/type";
+import type {
+    RecallObservation,
+    RecallProgress,
+} from "@/lib/playground/memory";
 
 type Props = {
     item: TypedRecallItem;
@@ -9,6 +13,9 @@ type Props = {
     onSuccess: () => void;
     onChangeInput: (input: string) => void;
     enableRemoteTypingSync?: boolean;
+    hintIntervalsMs?: number[];
+    onRecallProgress?: (progress: RecallProgress) => void;
+    onRecallComplete?: (observation: RecallObservation) => void;
 };
 
 export default function TypedRecallView({
@@ -19,6 +26,9 @@ export default function TypedRecallView({
     onSuccess,
     onChangeInput,
     enableRemoteTypingSync = true,
+    hintIntervalsMs,
+    onRecallProgress,
+    onRecallComplete,
 }: Readonly<Props>) {
     return (
         <TypingView
@@ -30,6 +40,9 @@ export default function TypedRecallView({
             onChangeInput={onChangeInput}
             currentInput={currentInput}
             enableRemoteTypingSync={enableRemoteTypingSync}
+            hintIntervalsMs={hintIntervalsMs}
+            onRecallProgress={onRecallProgress}
+            onRecallComplete={onRecallComplete}
         />
     );
 }
