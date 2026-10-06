@@ -1,4 +1,5 @@
 "use client";
+import { getSignInUrl } from "@/lib/auth/sign-in-url";
 
 import {
     useCallback,
@@ -147,7 +148,7 @@ export default function Client({
 
             if (!loaded.userId) {
                 router.replace(
-                    process.env.NEXT_PUBLIC_SIGN_IN_URL!,
+                    getSignInUrl(),
                 );
                 return;
             }
@@ -656,7 +657,7 @@ export default function Client({
             onPlayAgain={startGame}
             onCreateRoom={() =>
                 router.push(
-                    process.env.NEXT_PUBLIC_SIGN_IN_URL!,
+                    getSignInUrl(),
                 )
             }
             enableRemoteTypingSync={false}
