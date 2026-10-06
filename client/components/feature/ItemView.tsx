@@ -1,6 +1,7 @@
 import TypedRecallView from "@/components/feature/TypedRecallView";
 import type { Item } from "@/type";
 import type {
+    LearningMode,
     RecallObservation,
     RecallProgress,
 } from "@/lib/playground/memory";
@@ -13,7 +14,10 @@ type Props = {
     onSuccess: () => void;
     onChangeInput: (input: string) => void;
     enableRemoteTypingSync?: boolean;
-    hintIntervalsMs?: number[];
+    learningMode?: LearningMode;
+    initialCueRatio?: number;
+    cueSteps?: number[];
+    stallMs?: number | null;
     onRecallProgress?: (progress: RecallProgress) => void;
     onRecallComplete?: (observation: RecallObservation) => void;
 };
