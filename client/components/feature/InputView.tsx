@@ -99,6 +99,15 @@ export default function TypingView({
     const isReadonly = currentInput !== null;
 
     useEffect(() => {
+        if (isReadonly || !english) return;
+
+        recallStartedAtRef.current = performance.now();
+        firstKeyAtRef.current = null;
+        attemptCountRef.current = 1;
+        maxCorrectPrefixRef.current = 0;
+    }, [english, isReadonly, wordKey]);
+
+    useEffect(() => {
         if (isReadonly || !english) {
             setTimedHintCount(0);
             setRevealedHintLength(baseHintCount);
@@ -141,6 +150,7 @@ export default function TypingView({
     }, [
         english,
         hintIntervalsKey,
+        hintIntervalsMs,
         isReadonly,
         wordKey,
     ]);
@@ -234,6 +244,9 @@ export default function TypingView({
             );
 
         if (hasWrongHintedCharacter) {
+            if (input.some((character) => character !== "")) {
+                attemptCountRef.current += 1;
+            }
             setInput(Array(english.length).fill(""));
             setCurrentSelection(0);
             setCharInput("");
