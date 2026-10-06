@@ -7,6 +7,13 @@ export interface Secrets {
 }
 export type WorkerEnv = Env & Secrets;
 export type User = { id: string; displayName: string };
+export type TypedRecallItem = {
+	id: string;
+	type: 'typed_recall';
+	prompt: string;
+	answer: string;
+};
+export type Item = TypedRecallItem;
 export type Room = {
 	id: string;
 	title?: string;
@@ -16,7 +23,7 @@ export type Room = {
 	gameDuration: number;
 	createdAt?: string;
 	updatedAt?: string;
-	words: { jp: string; en: string }[];
+	items: Item[];
 	users: User[];
 	isStart: boolean;
 	gameId?: string;
