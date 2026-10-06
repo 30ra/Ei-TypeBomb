@@ -2,7 +2,7 @@ import "server-only";
 import { z } from "zod";
 import { Prompts } from "@posthog/ai";
 import { gemini, posthog } from "./gemini";
-import { LegacyWord } from "@/type";
+import type { LegacyWord } from "@/type";
 
 const prompts = new Prompts({ posthog });
 const defaultModel = "gemini-3.5-flash-lite";
