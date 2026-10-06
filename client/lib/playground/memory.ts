@@ -75,6 +75,7 @@ const LOW_CUE_THRESHOLD = 0.2;
 const CUE_STEPS = [0.2, 0.4, 0.7, 1] as const;
 const MAX_ACTIVE_LEARNING_ITEMS = 4;
 const MIN_INTERVENING_TURNS = 4;
+const MIN_REVIEWS_BEFORE_LONG_TERM = 5;
 
 export const toMemoryState = (row: {
     user_id: string;
@@ -381,7 +382,7 @@ export const chooseNextItem = ({
             if (
                 (session && session.phase !== "graduated") ||
                 !memory ||
-                memory.reviewCount === 0
+                memory.reviewCount < MIN_REVIEWS_BEFORE_LONG_TERM
             ) {
                 return false;
             }
@@ -404,13 +405,19 @@ export const chooseNextItem = ({
     }
 
     if (activeCount < MAX_ACTIVE_LEARNING_ITEMS) {
-        const unseen = items.find(
-            (item) =>
-                !sessionByItem[item.id] &&
-                (memoryByItem[item.id]?.reviewCount ?? 0) === 0 &&
-                notRecentlySeen(item),
-        );
-        if (unseen) return unseen;
+        const unfinished = items.find((item) => {
+            if (
+                sessionByItem[item.id] ||
+                !notRecentlySeen(item)
+            ) {
+                return false;
+            }
+
+            const reviewCount =
+                memoryByItem[item.id]?.reviewCount ?? 0;
+            return reviewCount < MIN_REVIEWS_BEFORE_LONG_TERM;
+        });
+        if (unfinished) return unfinished;
     }
 
     // Never stop play just because nothing is due. Reuse the best
@@ -420,17 +427,26 @@ export const chooseNextItem = ({
             ? items.filter(notRecentlySeen)
             : items;
 
+    const lastSeenIndex = (itemId: string) =>
+        recentItemIds.lastIndexOf(itemId);
+
     return (
         [...fallbackPool]
             .map((item) => ({
                 item,
+                lastSeenIndex: lastSeenIndex(item.id),
                 score: getItemPriority({
                     item,
                     memory: memoryByItem[item.id],
                     recentItemIds,
                 }),
             }))
-            .sort((a, b) => b.score - a.score)[0]?.item ?? items[0]
+            .sort((a, b) => {
+                if (a.lastSeenIndex !== b.lastSeenIndex) {
+                    return a.lastSeenIndex - b.lastSeenIndex;
+                }
+                return b.score - a.score;
+            })[0]?.item ?? items[0]
     );
 };
 export const createTurnPlan = (
