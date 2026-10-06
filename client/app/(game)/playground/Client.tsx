@@ -456,6 +456,8 @@ export default function Client({
         setTrackedTurn,
     ]);
 
+    const currentTurnUser = users[currentTurn];
+
     const currentTurnPlan = useMemo(() => {
         if (
             currentTurnUser?.id !== LOCAL_USER_ID ||
@@ -576,8 +578,6 @@ export default function Client({
         currentTurnPlan,
         recallPressurePaused,
     ]);
-
-    const currentTurnUser = users[currentTurn];
 
     useEffect(() => {
         if (
