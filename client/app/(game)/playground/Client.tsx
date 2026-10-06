@@ -842,7 +842,7 @@ export default function Client({
             learningMode={activeLearningPlan?.mode}
             initialCueRatio={activeLearningPlan?.initialCueRatio}
             cueSteps={activeLearningPlan?.cueSteps}
-            stallMs={activeLearningPlan?.stallMs}
+            hintDelaysMs={activeLearningPlan?.hintDelaysMs}
             onPlayAgain={startGame}
             onCreateRoom={() => router.push(getSignInUrl())}
             enableRemoteTypingSync={false}
