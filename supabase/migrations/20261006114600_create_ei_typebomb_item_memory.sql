@@ -23,75 +23,35 @@ grant select, insert, update, delete
     on table public.ei_typebomb_item_memory
     to authenticated, service_role;
 
-do $$
-begin
-    if not exists (
-        select 1
-        from pg_policies
-        where schemaname = 'public'
-          and tablename = 'ei_typebomb_item_memory'
-          and policyname = 'Users can read their own ETB memory'
-    ) then
-        create policy "Users can read their own ETB memory"
-            on public.ei_typebomb_item_memory
-            for select
-            to authenticated
-            using ((select auth.uid()) = user_id);
-    end if;
-end
-$$;
+drop policy if exists "Users can read their own ETB memory"
+    on public.ei_typebomb_item_memory;
+create policy "Users can read their own ETB memory"
+    on public.ei_typebomb_item_memory
+    for select
+    to authenticated
+    using ((select auth.uid()) = user_id);
 
-do $$
-begin
-    if not exists (
-        select 1
-        from pg_policies
-        where schemaname = 'public'
-          and tablename = 'ei_typebomb_item_memory'
-          and policyname = 'Users can insert their own ETB memory'
-    ) then
-        create policy "Users can insert their own ETB memory"
-            on public.ei_typebomb_item_memory
-            for insert
-            to authenticated
-            with check ((select auth.uid()) = user_id);
-    end if;
-end
-$$;
+drop policy if exists "Users can insert their own ETB memory"
+    on public.ei_typebomb_item_memory;
+create policy "Users can insert their own ETB memory"
+    on public.ei_typebomb_item_memory
+    for insert
+    to authenticated
+    with check ((select auth.uid()) = user_id);
 
-do $$
-begin
-    if not exists (
-        select 1
-        from pg_policies
-        where schemaname = 'public'
-          and tablename = 'ei_typebomb_item_memory'
-          and policyname = 'Users can update their own ETB memory'
-    ) then
-        create policy "Users can update their own ETB memory"
-            on public.ei_typebomb_item_memory
-            for update
-            to authenticated
-            using ((select auth.uid()) = user_id)
-            with check ((select auth.uid()) = user_id);
-    end if;
-end
-$$;
+drop policy if exists "Users can update their own ETB memory"
+    on public.ei_typebomb_item_memory;
+create policy "Users can update their own ETB memory"
+    on public.ei_typebomb_item_memory
+    for update
+    to authenticated
+    using ((select auth.uid()) = user_id)
+    with check ((select auth.uid()) = user_id);
 
-do $$
-begin
-    if not exists (
-        select 1
-        from pg_policies
-        where schemaname = 'public'
-          and tablename = 'ei_typebomb_item_memory'
-          and policyname = 'Users can delete their own ETB memory'
-    ) then
-        create policy "Users can delete their own ETB memory"
-            on public.ei_typebomb_item_memory
-            for delete
-            to authenticated
-            using ((select auth.uid()) = user_id);
-    end if;
-end
-$$;
+drop policy if exists "Users can delete their own ETB memory"
+    on public.ei_typebomb_item_memory;
+create policy "Users can delete their own ETB memory"
+    on public.ei_typebomb_item_memory
+    for delete
+    to authenticated
+    using ((select auth.uid()) = user_id);
