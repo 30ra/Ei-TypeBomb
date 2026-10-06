@@ -26,6 +26,9 @@ export type RecallObservation = RecallProgress & {
     firstAttemptCorrect: boolean;
     outcome?: RecallOutcome;
     finalCueRatio?: number;
+    initialCueRatio?: number;
+    additionalHintCount?: number;
+    reviewContext?: "scheduled" | "early_extra";
 };
 
 export type ItemMemoryState = {
@@ -38,6 +41,8 @@ export type ItemMemoryState = {
     lastReviewedAt: string | null;
     createdAt?: string | null;
     updatedAt?: string | null;
+    learningState?: PersistedLearningState | null;
+    lastPresentedAt?: string | null;
 };
 
 export type LearningMode =
@@ -69,13 +74,70 @@ export type SessionLearningState = {
 };
 
 const INITIAL_ENCODING_STABILITY = 0.15;
-const RELEARNING_ENCODING_GAIN = 0.15;
 const FAILURE_PENALTY = 0.55;
 const LOW_CUE_THRESHOLD = 0.2;
 const CUE_STEPS = [0.2, 0.4, 0.7, 1] as const;
-const MAX_ACTIVE_LEARNING_ITEMS = 4;
-const MIN_INTERVENING_TURNS = 4;
-const MIN_REVIEWS_BEFORE_LONG_TERM = 5;
+export const MAX_ACTIVE_LEARNING_ITEMS = 4;
+export const MIN_INTERVENING_TURNS = 4;
+export const MEMORY_MODEL_VERSION = "playground-v2";
+
+export type PersistedLearningState = Pick<
+    SessionLearningState,
+    "phase" | "freeRecallSuccesses" | "lastCueRatio" |
+    "relearningSinceLastFreeRecall" | "cueSuccessStreak"
+>;
+
+export const restoreSessionLearning = (
+    memory: ItemMemoryState | undefined,
+    turn: number,
+): SessionLearningState => ({
+    phase: memory?.learningState?.phase ??
+        ((memory?.reviewCount ?? 0) === 0 ? "encoding" : "supported_recall"),
+    freeRecallSuccesses: memory?.learningState?.freeRecallSuccesses ?? 0,
+    lastFreeRecallTurn: (memory?.learningState?.freeRecallSuccesses ?? 0) > 0 ? turn : null,
+    lastSeenTurn: turn,
+    lastCueRatio: memory?.learningState?.lastCueRatio ?? 0.5,
+    relearningSinceLastFreeRecall: memory?.learningState?.relearningSinceLastFreeRecall ?? false,
+    cueSuccessStreak: memory?.learningState?.cueSuccessStreak ?? 0,
+});
+
+export const persistSessionLearning = (state: SessionLearningState): PersistedLearningState => ({
+    phase: state.phase,
+    freeRecallSuccesses: state.freeRecallSuccesses,
+    lastCueRatio: state.lastCueRatio,
+    relearningSinceLastFreeRecall: state.relearningSinceLastFreeRecall,
+    cueSuccessStreak: state.cueSuccessStreak,
+});
+
+export const updateSessionLearning = (
+    current: SessionLearningState,
+    observation: RecallObservation,
+    turn: number,
+): SessionLearningState => {
+    const ratio = observation.finalCueRatio ?? observation.revealedHintChars / Math.max(1, observation.answerLength);
+    const failed = !observation.success || observation.outcome === "relearned";
+    if (observation.outcome === "encoding") {
+        return { ...current, phase: "supported_recall", lastSeenTurn: turn, lastCueRatio: 0.5, cueSuccessStreak: 0 };
+    }
+    if (failed) {
+        return { ...current, phase: "supported_recall", freeRecallSuccesses: 0, lastFreeRecallTurn: null, lastSeenTurn: turn, lastCueRatio: 0.6, cueSuccessStreak: 0, relearningSinceLastFreeRecall: true };
+    }
+    if (observation.reviewContext === "early_extra") {
+        return { ...current, lastSeenTurn: turn };
+    }
+    if (ratio === 0) {
+        const separated = current.lastFreeRecallTurn === null || turn - current.lastFreeRecallTurn > MIN_INTERVENING_TURNS;
+        const successes = separated ? current.freeRecallSuccesses + 1 : current.freeRecallSuccesses;
+        return { ...current, phase: successes >= 2 ? "graduated" : "free_recall", freeRecallSuccesses: successes, lastFreeRecallTurn: separated ? turn : current.lastFreeRecallTurn, lastSeenTurn: turn, lastCueRatio: 0, cueSuccessStreak: 0, relearningSinceLastFreeRecall: false };
+    }
+    // Advance the requested cue stage, rather than the rounded character ratio.
+    // Extra hints indicate that the current stage still needs practice.
+    const requestedCue = observation.initialCueRatio ?? current.lastCueRatio;
+    const supported = requestedCue > 0 && (observation.additionalHintCount ?? 0) === 0;
+    const streak = supported ? current.cueSuccessStreak + 1 : 0;
+    const nextCue = streak >= 2 ? (requestedCue > 0.4 ? 0.4 : requestedCue > 0.2 ? 0.2 : 0) : requestedCue;
+    return { ...current, phase: nextCue === 0 ? "free_recall" : "supported_recall", freeRecallSuccesses: 0, lastFreeRecallTurn: null, lastSeenTurn: turn, lastCueRatio: supported ? nextCue : Math.min(0.7, Math.max(0.2, ratio)), cueSuccessStreak: streak >= 2 ? 0 : streak, relearningSinceLastFreeRecall: false };
+};
 
 export const toMemoryState = (row: {
     user_id: string;
@@ -87,6 +149,8 @@ export const toMemoryState = (row: {
     last_reviewed_at: string;
     created_at?: string | null;
     updated_at?: string | null;
+    learning_state?: PersistedLearningState | null;
+    last_presented_at?: string | null;
 }): ItemMemoryState => ({
     userId: row.user_id,
     roomId: row.room_id,
@@ -97,6 +161,8 @@ export const toMemoryState = (row: {
     lastReviewedAt: row.last_reviewed_at ?? null,
     createdAt: row.created_at ?? null,
     updatedAt: row.updated_at ?? null,
+    learningState: row.learning_state ?? null,
+    lastPresentedAt: row.last_presented_at ?? null,
 });
 
 export const createInitialMemory = (
@@ -107,7 +173,7 @@ export const createInitialMemory = (
     userId,
     roomId,
     itemId,
-    stability: 0.35,
+    stability: INITIAL_ENCODING_STABILITY,
     difficulty: 5,
     reviewCount: 0,
     lastReviewedAt: null,
@@ -180,11 +246,10 @@ export const applyRecallObservation = ({
     } else if (outcome === "relearned" || !observation.success) {
         stability = Math.max(
             0.12,
-            current.stability * FAILURE_PENALTY +
-                RELEARNING_ENCODING_GAIN,
+            current.stability * FAILURE_PENALTY,
         );
         nextDifficulty = clamp(difficulty + 0.7, 1, 10);
-    } else {
+    } else if (observation.reviewContext !== "early_extra") {
         const recallWeight =
             finalCueRatio === 0
                 ? 1
@@ -195,7 +260,8 @@ export const applyRecallObservation = ({
                     : finalCueRatio <= 0.7
                       ? 0.2
                       : 0.05;
-        const spacingGain = 0.55 + (1 - retrievability) * 1.45;
+        // No fixed gain at zero delay; coefficients remain a testable heuristic.
+        const spacingGain = (1 - retrievability) * 2;
         const difficultyDrag =
             1 - ((difficulty - 1) / 9) * 0.25;
         const attemptPenalty = clamp(
@@ -236,7 +302,11 @@ export const applyRecallObservation = ({
         stability,
         difficulty: nextDifficulty,
         reviewCount: current.reviewCount + 1,
-        lastReviewedAt: isoNow,
+        lastReviewedAt:
+            observation.reviewContext === "early_extra" && observation.success && outcome !== "relearned"
+                ? current.lastReviewedAt
+                : isoNow,
+        lastPresentedAt: isoNow,
         updatedAt: isoNow,
     };
 };
@@ -297,7 +367,6 @@ export const chooseNextItem = ({
     currentTurnNumber?: number;
 }) => {
     if (items.length === 0) return null;
-    if (items.length === 1) return items[0];
 
     const cooldown = new Set(recentItemIds.slice(-3));
     const notRecentlySeen = (item: Item) => !cooldown.has(item.id);
@@ -366,8 +435,7 @@ export const chooseNextItem = ({
             const graduatedThisSession =
                 session?.phase === "graduated";
             const persistedLongTermCandidate =
-                !session &&
-                memory.reviewCount >= MIN_REVIEWS_BEFORE_LONG_TERM;
+                !session && memory.learningState?.phase === "graduated";
 
             if (
                 !graduatedThisSession &&
@@ -402,9 +470,7 @@ export const chooseNextItem = ({
                 return false;
             }
 
-            const reviewCount =
-                memoryByItem[item.id]?.reviewCount ?? 0;
-            return reviewCount < MIN_REVIEWS_BEFORE_LONG_TERM;
+            return memoryByItem[item.id]?.learningState?.phase !== "graduated";
         });
         if (unfinished) return unfinished;
     }
@@ -415,16 +481,19 @@ export const chooseNextItem = ({
         const session = sessionByItem[item.id];
         return (
             notRecentlySeen(item) &&
-            (!session || session.phase === "graduated")
+            (session?.phase === "graduated" || (!session && memoryByItem[item.id]?.learningState?.phase === "graduated"))
         );
     });
-    const notRecent = items.filter(notRecentlySeen);
+    const admitted = items.filter((item) =>
+        sessionByItem[item.id] || memoryByItem[item.id]?.learningState?.phase === "graduated",
+    );
+    const notRecent = admitted.filter(notRecentlySeen);
     const fallbackPool =
         nonActiveNotRecent.length > 0
             ? nonActiveNotRecent
             : notRecent.length > 0
               ? notRecent
-              : items;
+              : admitted.length > 0 ? admitted : items;
 
     const lastSeenIndex = (itemId: string) =>
         recentItemIds.lastIndexOf(itemId);
@@ -454,8 +523,9 @@ export const createTurnPlan = (
 ): TurnPlan => {
     const retrievability = getRetrievability(memory);
     const difficulty = memory?.difficulty ?? 5;
+    const timeAdjustment = Math.round((difficulty - 5) * 600);
 
-    if (session?.phase === "encoding" || (!memory && !session)) {
+    if (session?.phase === "encoding" || (!session && (memory?.reviewCount ?? 0) === 0)) {
         return {
             mode: "encoding",
             retrievalWindowMs: 0,
@@ -471,13 +541,13 @@ export const createTurnPlan = (
 
     if (session?.phase === "supported_recall") {
         const initialCueRatio = clamp(
-            session.lastCueRatio || 0.5,
+            session.lastCueRatio,
             0.2,
             0.7,
         );
         return {
             mode: "supported_recall",
-            retrievalWindowMs: 22_000,
+            retrievalWindowMs: clamp(22_000 + timeAdjustment, 15_000, 28_000),
             retrievability,
             difficulty,
             initialCueRatio,
@@ -493,7 +563,7 @@ export const createTurnPlan = (
     if (session?.phase === "free_recall") {
         return {
             mode: "free_recall",
-            retrievalWindowMs: 18_000,
+            retrievalWindowMs: clamp(18_000 + timeAdjustment, 12_000, 26_000),
             retrievability,
             difficulty,
             initialCueRatio: 0,
@@ -508,7 +578,7 @@ export const createTurnPlan = (
     if (retrievability < 0.35) {
         return {
             mode: "relearning",
-            retrievalWindowMs: 24_000,
+            retrievalWindowMs: clamp(24_000 + timeAdjustment, 18_000, 30_000),
             retrievability,
             difficulty,
             initialCueRatio: 0.6,
@@ -522,7 +592,7 @@ export const createTurnPlan = (
     if (retrievability < 0.72) {
         return {
             mode: "supported_recall",
-            retrievalWindowMs: 22_000,
+            retrievalWindowMs: clamp(22_000 + timeAdjustment, 15_000, 28_000),
             retrievability,
             difficulty,
             initialCueRatio: 0.2,
@@ -535,7 +605,7 @@ export const createTurnPlan = (
 
     return {
         mode: "free_recall",
-        retrievalWindowMs: 18_000,
+        retrievalWindowMs: clamp(18_000 + timeAdjustment, 12_000, 26_000),
         retrievability,
         difficulty,
         initialCueRatio: 0,
@@ -581,23 +651,9 @@ export const shouldRecommendStop = ({
 }) => {
     if (now - sessionStartedAt >= 15 * 60_000) return true;
 
-    const minimumReviews = Math.min(
-        Math.max(4, items.length),
-        8,
+    if (userReviewCount < 4 || items.length === 0) return false;
+    return items.every((item) =>
+        memoryByItem[item.id]?.learningState?.phase === "graduated" &&
+        getRetrievability(memoryByItem[item.id], now) >= 0.8,
     );
-    if (userReviewCount < minimumReviews) return false;
-
-    const highestRemainingValue = Math.max(
-        ...items.map((item) =>
-            getItemPriority({
-                item,
-                memory: memoryByItem[item.id],
-                recentItemIds: [],
-                now,
-            }),
-        ),
-        0,
-    );
-
-    return highestRemainingValue < 0.48;
 };

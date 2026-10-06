@@ -1,3 +1,4 @@
+import { correctPrefixLength, getInitialCueLength, hintCoversError } from "@/lib/playground/recall-input";
 import { useEffect, useRef, useState } from "react";
 import { io } from "@/lib/room/socket";
 import { getAuthToken } from "@/lib/room/auth";
@@ -8,21 +9,6 @@ import type {
 } from "@/lib/playground/memory";
 
 const DEFAULT_CUE_STEPS = [0.2, 0.4, 0.7, 1];
-
-const correctPrefixLength = (input: string[], answer: string) => {
-    let length = 0;
-
-    while (
-        length < input.length &&
-        length < answer.length &&
-        input[length] !== "" &&
-        input[length] === answer[length]
-    ) {
-        length += 1;
-    }
-
-    return length;
-};
 
 const isSoundEffectsEnabled = () => {
     if (typeof document === "undefined") return true;
@@ -67,12 +53,10 @@ export default function TypingView({
     onRecallProgress?: (progress: RecallProgress) => void;
     onRecallComplete?: (observation: RecallObservation) => void;
 }) {
-    const baseHintCount = hasDuplicateMeaning ? 1 : 0;
+    // Adaptive practice must offer a genuinely unaided attempt.
+    const baseHintCount = hasDuplicateMeaning && !learningMode ? 1 : 0;
     const initialCueLength = english
-        ? Math.max(
-              baseHintCount,
-              Math.ceil(english.length * initialCueRatio),
-          )
+        ? getInitialCueLength(english.length, initialCueRatio, baseHintCount)
         : baseHintCount;
     const [timedHintCount, setTimedHintCount] = useState(0);
     const [revealedHintLength, setRevealedHintLength] =
@@ -81,6 +65,8 @@ export default function TypingView({
         english ? Array(english.length).fill("") : [],
     );
     const inputStateRef = useRef(input);
+    const revealedHintLengthRef = useRef(initialCueLength);
+    const onChangeInputRef = useRef(onChangeInput);
     const [currentSelection, setCurrentSelection] = useState(0);
     const inputRef = useRef<HTMLInputElement | null>(null);
     const inputFrameRef = useRef<HTMLDivElement | null>(null);
@@ -116,7 +102,8 @@ export default function TypingView({
 
     useEffect(() => {
         inputStateRef.current = input;
-    }, [input]);
+        onChangeInputRef.current = onChangeInput;
+    }, [input, onChangeInput]);
 
     useEffect(() => {
         if (isReadonly || !english) return;
@@ -136,6 +123,7 @@ export default function TypingView({
 
         setTimedHintCount(0);
         setRevealedHintLength(initialCueLength);
+        revealedHintLengthRef.current = initialCueLength;
         lastCorrectProgressAtRef.current = performance.now();
 
         if (stallMs === null || initialCueRatio >= 1) return;
@@ -152,45 +140,24 @@ export default function TypingView({
                     now - lastCorrectProgressAtRef.current;
 
                 if (elapsedSinceProgress >= stallMs) {
-                    setRevealedHintLength((currentLength) => {
-                        const currentRatio =
-                            currentLength / english.length;
-                        const prefixRatio =
-                            correctPrefixLength(
-                                inputStateRef.current,
-                                english,
-                            ) / english.length;
-                        const nextRatio =
-                            cueSteps.find(
-                                (ratio) =>
-                                    ratio >
-                                    Math.max(
-                                        currentRatio,
-                                        prefixRatio,
-                                    ),
-                            ) ?? 1;
-                        const nextLength = Math.min(
-                            english.length,
-                            Math.max(
-                                currentLength,
-                                Math.ceil(
-                                    english.length * nextRatio,
-                                ),
-                                correctPrefixLength(
-                                    inputStateRef.current,
-                                    english,
-                                ),
-                            ),
-                        );
-
-                        if (nextLength > currentLength) {
-                            setTimedHintCount(
-                                (count) => count + 1,
-                            );
+                    const currentLength = revealedHintLengthRef.current;
+                    const prefixLength = correctPrefixLength(inputStateRef.current, english);
+                    const nextRatio = cueSteps.find((ratio) => ratio > Math.max(currentLength, prefixLength) / english.length) ?? 1;
+                    const nextLength = Math.min(english.length, Math.max(currentLength, Math.ceil(english.length * nextRatio), prefixLength));
+                    if (nextLength > currentLength) {
+                        revealedHintLengthRef.current = nextLength;
+                        setRevealedHintLength(nextLength);
+                        setTimedHintCount((count) => count + 1);
+                        if (hintCoversError(inputStateRef.current, english, nextLength)) {
+                            attemptCountRef.current += 1;
+                            inputStateRef.current = Array(english.length).fill("");
+                            setInput(inputStateRef.current);
+                            setCurrentSelection(0);
+                            setCharInput("");
+                            setIsFailAnimating(true);
+                            onChangeInputRef.current("");
                         }
-
-                        return nextLength;
-                    });
+                    }
                     lastCorrectProgressAtRef.current = now;
                 }
 
@@ -357,6 +324,8 @@ export default function TypingView({
                     answerLength: english.length,
                     outcome,
                     finalCueRatio,
+                    initialCueRatio,
+                    additionalHintCount: timedHintCount,
                     firstAttemptCorrect:
                         attemptCountRef.current === 1 &&
                         hintCount === 0,

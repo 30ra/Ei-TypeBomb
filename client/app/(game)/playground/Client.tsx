@@ -15,11 +15,17 @@ import GameView from "@/components/feature/GameView";
 import Button from "@/components/ui/Button";
 import { newPositions } from "@/lib/ui/position";
 import posthog from "posthog-js";
+import { advanceBombClock } from "@/lib/playground/bomb-clock";
 import {
     applyRecallObservation,
     chooseNextItem,
     createTurnPlan,
     shouldRecommendStop,
+    restoreSessionLearning,
+    persistSessionLearning,
+    updateSessionLearning as advanceSessionLearning,
+    MIN_INTERVENING_TURNS,
+    MEMORY_MODEL_VERSION,
     type ItemMemoryState,
     type RecallObservation,
     type RecallProgress,
@@ -45,7 +51,6 @@ const DEFAULT_TYPING_DELAY_MS = 220;
 const MIN_TYPING_DELAY_MS = 80;
 const MAX_TYPING_DELAY_MS = 600;
 const TYPING_SPEED_SMOOTHING = 0.3;
-const MIN_REVIEWS_BEFORE_LONG_TERM = 5;
 
 const clampTypingDelay = (delayMs: number) =>
     Math.min(
@@ -88,6 +93,10 @@ export default function Client({
     const pendingMemoryRef = useRef(
         new Map<string, ItemMemoryState>(),
     );
+    const syncInFlightRef = useRef<Promise<void> | null>(null);
+    const currentReviewContextRef = useRef<"scheduled" | "early_extra">("scheduled");
+    const lastPresentedTurnRef = useRef<Record<string, number>>({});
+    const [saveError, setSaveError] = useState(false);
     const authenticatedUserIdRef = useRef<string | null>(null);
     const [memoryReady, setMemoryReady] = useState(false);
     const [memoryError, setMemoryError] = useState<string | null>(
@@ -99,6 +108,8 @@ export default function Client({
     const [currentTurn, setCurrentTurn] = useState(0);
     const currentTurnRef = useRef(0);
     const [bombStatus, setBombStatus] = useState(0);
+    const bombStageProgressRef = useRef(0);
+    const bombPlanRef = useRef<{ duration: number; paused: boolean }>({ duration: 18_000, paused: true });
     const [isStarted, setIsStarted] = useState(false);
     const [result, setResult] = useState<boolean | null>(null);
     const [currentInput, setCurrentInput] = useState("");
@@ -186,6 +197,20 @@ export default function Client({
             }
 
             authenticatedUserIdRef.current = loaded.userId;
+            // Recover unsent observations after reload, scoped to the authenticated user.
+            try {
+                const queued: ItemMemoryState[] = JSON.parse(localStorage.getItem(`playground-pending:${loaded.userId}:${room.id}`) ?? "[]");
+                for (const pending of queued) {
+                    if (pending.userId !== loaded.userId || pending.roomId !== room.id || !items.some((item) => item.id === pending.itemId) || !Number.isFinite(pending.stability) || !Number.isFinite(pending.difficulty)) continue;
+                    const remote = loaded.memoryByItem[pending.itemId];
+                    if (!remote || Date.parse(pending.updatedAt ?? "") > Date.parse(remote.updatedAt ?? "")) {
+                        loaded.memoryByItem[pending.itemId] = pending;
+                        pendingMemoryRef.current.set(pending.itemId, pending);
+                    }
+                }
+            } catch {
+                // A damaged/unavailable local cache must not prevent practice.
+            }
             memoryByItemRef.current = loaded.memoryByItem;
             setMemoryByItem(loaded.memoryByItem);
             setMemoryReady(true);
@@ -196,7 +221,7 @@ export default function Client({
         return () => {
             cancelled = true;
         };
-    }, [room.id, router]);
+    }, [room.id, router, items]);
 
     const setTrackedItem = useCallback((item: Item | null) => {
         currentItemRef.current = item;
@@ -216,33 +241,30 @@ export default function Client({
                 LOCAL_USER_ID;
             const memory = memoryByItemRef.current[item.id];
 
-            if (
-                isLocalTurn &&
-                !sessionByItemRef.current[item.id] &&
-                (!memory ||
-                    memory.reviewCount <
-                        MIN_REVIEWS_BEFORE_LONG_TERM)
-            ) {
-                const nextSessionState: SessionLearningState = {
-                    phase:
-                        !memory || memory.reviewCount === 0
-                            ? "encoding"
-                            : "supported_recall",
-                    freeRecallSuccesses: 0,
-                    lastFreeRecallTurn: null,
-                    lastSeenTurn: sessionTurnNumberRef.current,
-                    lastCueRatio:
-                        !memory || memory.reviewCount === 0
-                            ? 1
-                            : memory.reviewCount === 1
-                              ? 0.5
-                              : 0.2,
-                    relearningSinceLastFreeRecall: false,
-                    cueSuccessStreak: 0,
-                };
+            const previousExposure = lastPresentedTurnRef.current[item.id];
+            const currentSession = sessionByItemRef.current[item.id];
+            const phase = currentSession?.phase ?? memory?.learningState?.phase;
+            const tooSoon = previousExposure !== undefined
+                ? sessionTurnNumberRef.current - previousExposure <= MIN_INTERVENING_TURNS
+                : memory?.lastPresentedAt
+                  ? Date.now() - Date.parse(memory.lastPresentedAt) < 30_000
+                  : false;
+            currentReviewContextRef.current =
+                tooSoon || (phase === "graduated" && createTurnPlan(memory).retrievability >= 0.8)
+                    ? "early_extra" : "scheduled";
+            lastPresentedTurnRef.current[item.id] = sessionTurnNumberRef.current;
+
+            if (isLocalTurn && !currentSession) {
                 sessionByItemRef.current = {
                     ...sessionByItemRef.current,
-                    [item.id]: nextSessionState,
+                    [item.id]: restoreSessionLearning(memory, sessionTurnNumberRef.current),
+                };
+                setSessionByItem(sessionByItemRef.current);
+            } else if (!isLocalTurn && currentSession) {
+                // Seeing a BOT type the answer is exposure, even though it is not a user review.
+                sessionByItemRef.current = {
+                    ...sessionByItemRef.current,
+                    [item.id]: { ...currentSession, lastSeenTurn: sessionTurnNumberRef.current },
                 };
                 setSessionByItem(sessionByItemRef.current);
             }
@@ -308,6 +330,7 @@ export default function Client({
         resetExplosion();
         setIsStarted(true);
         setBombStatus(0);
+        bombStageProgressRef.current = 0;
         setCurrentInput("");
         setResult(null);
         setLostDisplayName(null);
@@ -367,141 +390,6 @@ export default function Client({
         users.length,
     ]);
 
-    const updateSessionLearning = useCallback(
-        (item: Item, observation: RecallObservation) => {
-            const current = sessionByItemRef.current[item.id];
-            const finalCueRatio =
-                observation.finalCueRatio ??
-                observation.revealedHintChars /
-                    Math.max(1, observation.answerLength);
-            const outcome =
-                observation.outcome ??
-                (observation.success
-                    ? finalCueRatio === 0
-                        ? "free_recall"
-                        : finalCueRatio >= 1
-                          ? "relearned"
-                          : "cued_recall"
-                    : "relearned");
-
-            // Existing long-term items stay in the long-term scheduler
-            // unless they genuinely fail and need relearning.
-            if (
-                !current &&
-                outcome !== "encoding" &&
-                outcome !== "relearned"
-            ) {
-                return;
-            }
-
-            let next: SessionLearningState =
-                current ?? {
-                    phase: "supported_recall",
-                    freeRecallSuccesses: 0,
-                    lastFreeRecallTurn: null,
-                    lastSeenTurn: sessionTurnNumberRef.current,
-                    lastCueRatio: 0.6,
-                    relearningSinceLastFreeRecall: false,
-                    cueSuccessStreak: 0,
-                };
-
-            if (outcome === "encoding") {
-                next = {
-                    ...next,
-                    phase: "supported_recall",
-                    freeRecallSuccesses: 0,
-                    lastFreeRecallTurn: null,
-                    lastSeenTurn: sessionTurnNumberRef.current,
-                    lastCueRatio: 0.5,
-                    relearningSinceLastFreeRecall: false,
-                    cueSuccessStreak: 0,
-                };
-            } else if (
-                outcome === "relearned" ||
-                !observation.success
-            ) {
-                next = {
-                    ...next,
-                    phase: "supported_recall",
-                    freeRecallSuccesses: 0,
-                    lastFreeRecallTurn: null,
-                    lastSeenTurn: sessionTurnNumberRef.current,
-                    lastCueRatio: 0.6,
-                    relearningSinceLastFreeRecall: true,
-                    cueSuccessStreak: 0,
-                };
-            } else if (outcome === "cued_recall") {
-                if (finalCueRatio <= 0.2) {
-                    next = {
-                        ...next,
-                        phase: "free_recall",
-                        freeRecallSuccesses: 0,
-                        lastFreeRecallTurn: null,
-                        lastSeenTurn: sessionTurnNumberRef.current,
-                        lastCueRatio: 0,
-                        relearningSinceLastFreeRecall: false,
-                        cueSuccessStreak: 0,
-                    };
-                } else {
-                    const streak = next.cueSuccessStreak + 1;
-                    const canReduceCue = streak >= 2;
-                    const reducedCue =
-                        finalCueRatio > 0.4
-                            ? 0.4
-                            : finalCueRatio > 0.2
-                              ? 0.2
-                              : 0;
-
-                    next = {
-                        ...next,
-                        phase:
-                            canReduceCue && reducedCue === 0
-                                ? "free_recall"
-                                : "supported_recall",
-                        freeRecallSuccesses: 0,
-                        lastFreeRecallTurn: null,
-                        lastSeenTurn: sessionTurnNumberRef.current,
-                        lastCueRatio: canReduceCue
-                            ? reducedCue
-                            : finalCueRatio,
-                        relearningSinceLastFreeRecall: false,
-                        cueSuccessStreak: canReduceCue ? 0 : streak,
-                    };
-                }
-            } else if (outcome === "free_recall") {
-                const separatedEnough =
-                    next.lastFreeRecallTurn === null ||
-                    sessionTurnNumberRef.current -
-                        next.lastFreeRecallTurn >=
-                        4;
-                const nextSuccesses =
-                    separatedEnough &&
-                    !next.relearningSinceLastFreeRecall
-                        ? next.freeRecallSuccesses + 1
-                        : 1;
-                const graduated = nextSuccesses >= 2;
-
-                next = {
-                    ...next,
-                    phase: graduated ? "graduated" : "free_recall",
-                    freeRecallSuccesses: nextSuccesses,
-                    lastFreeRecallTurn: sessionTurnNumberRef.current,
-                    lastSeenTurn: sessionTurnNumberRef.current,
-                    lastCueRatio: 0,
-                    relearningSinceLastFreeRecall: false,
-                    cueSuccessStreak: 0,
-                };
-            }
-
-            sessionByItemRef.current = {
-                ...sessionByItemRef.current,
-                [item.id]: next,
-            };
-            setSessionByItem(sessionByItemRef.current);
-        },
-        [],
-    );
-
     const updateLocalMemory = useCallback(
         (
             item: Item,
@@ -510,15 +398,18 @@ export default function Client({
             const userId = authenticatedUserIdRef.current;
             if (!userId) return;
 
-            updateSessionLearning(item, observation);
+            const currentSession = sessionByItemRef.current[item.id] ?? restoreSessionLearning(memoryByItemRef.current[item.id], sessionTurnNumberRef.current);
+            const nextSession = advanceSessionLearning(currentSession, observation, sessionTurnNumberRef.current);
+            sessionByItemRef.current = { ...sessionByItemRef.current, [item.id]: nextSession };
+            setSessionByItem(sessionByItemRef.current);
 
-            const nextMemory = applyRecallObservation({
+            const nextMemory = { ...applyRecallObservation({
                 memory: memoryByItemRef.current[item.id],
                 observation,
                 userId,
                 roomId: room.id,
                 itemId: item.id,
-            });
+            }), learningState: persistSessionLearning(nextSession) };
 
             const nextMemoryByItem = {
                 ...memoryByItemRef.current,
@@ -534,6 +425,11 @@ export default function Client({
                 room_id: room.id,
                 item_id: item.id,
                 success: observation.success,
+                model_version: MEMORY_MODEL_VERSION,
+                review_context: observation.reviewContext,
+                elapsed_ms: observation.elapsedMs,
+                initial_cue_ratio: observation.initialCueRatio,
+                additional_hint_count: observation.additionalHintCount,
                 recall_latency_ms: observation.recallLatencyMs,
                 hint_count: observation.hintCount,
                 revealed_hint_chars:
@@ -550,43 +446,70 @@ export default function Client({
                 difficulty_after: nextMemory.difficulty,
             });
         },
-        [room.id, updateSessionLearning],
+        [room.id],
     );
 
-    const flushPendingMemory = useCallback(async () => {
-        const snapshot = [
-            ...pendingMemoryRef.current.values(),
-        ];
-        if (snapshot.length === 0) return;
-
-        const error = await syncPlaygroundMemory(snapshot);
-
-        if (error) {
-            console.error(
-                "Failed to sync playground memory",
-                error,
-            );
-            posthog.capture("playground_memory_sync_failed", {
-                room_id: room.id,
-                item_count: snapshot.length,
-            });
-            return;
+    const cachePendingMemory = useCallback(() => {
+        const userId = authenticatedUserIdRef.current;
+        if (!userId) return;
+        try {
+            localStorage.setItem(`playground-pending:${userId}:${room.id}`, JSON.stringify([...pendingMemoryRef.current.values()]));
+        } catch {
+            // Network sync still works when local storage is unavailable.
         }
-
-        for (const synced of snapshot) {
-            const current = pendingMemoryRef.current.get(
-                synced.itemId,
-            );
-            if (current?.updatedAt === synced.updatedAt) {
-                pendingMemoryRef.current.delete(synced.itemId);
-            }
-        }
-
-        posthog.capture("playground_memory_synced", {
-            room_id: room.id,
-            item_count: snapshot.length,
-        });
     }, [room.id]);
+
+    const flushPendingMemory = useCallback(async () => {
+        cachePendingMemory();
+        if (syncInFlightRef.current) return syncInFlightRef.current;
+        const sync = async () => {
+            // Serialize requests so an older write cannot overtake a newer one.
+            while (pendingMemoryRef.current.size > 0) {
+                const snapshot = [...pendingMemoryRef.current.values()];
+                try {
+                    const error = await syncPlaygroundMemory(snapshot);
+                    if (error) throw error;
+                    for (const synced of snapshot) {
+                        if (pendingMemoryRef.current.get(synced.itemId) === synced) pendingMemoryRef.current.delete(synced.itemId);
+                    }
+                    cachePendingMemory();
+                    setSaveError(false);
+                } catch (error) {
+                    console.error("Failed to sync playground memory", error);
+                    setSaveError(true);
+                    posthog.capture("playground_memory_sync_failed", { room_id: room.id });
+                    break;
+                }
+            }
+        };
+        const promise = sync();
+        syncInFlightRef.current = promise;
+        try { await promise; } finally { syncInFlightRef.current = null; }
+    }, [room.id, cachePendingMemory]);
+
+    useEffect(() => {
+        if (!memoryReady) return;
+        cachePendingMemory();
+        const timer = setTimeout(() => { void flushPendingMemory(); }, 300);
+        return () => clearTimeout(timer);
+    }, [memoryByItem, memoryReady, cachePendingMemory, flushPendingMemory]);
+
+    useEffect(() => {
+        const retry = () => { void flushPendingMemory(); };
+        const leaving = () => { cachePendingMemory(); void flushPendingMemory(); };
+        const hidden = () => { if (document.visibilityState === "hidden") leaving(); };
+        const interval = setInterval(retry, 5_000);
+        window.addEventListener("online", retry);
+        window.addEventListener("pagehide", leaving);
+        document.addEventListener("visibilitychange", hidden);
+        return () => {
+            clearInterval(interval);
+            window.removeEventListener("online", retry);
+            window.removeEventListener("pagehide", leaving);
+            document.removeEventListener("visibilitychange", hidden);
+            cachePendingMemory();
+        };
+    }, [cachePendingMemory, flushPendingMemory]);
 
     const handleRecallProgress = useCallback(
         (progress: RecallProgress) => {
@@ -620,7 +543,7 @@ export default function Client({
                 return;
             }
 
-            updateLocalMemory(item, observation);
+            updateLocalMemory(item, { ...observation, reviewContext: currentReviewContextRef.current });
         },
         [updateLocalMemory],
     );
@@ -657,6 +580,17 @@ export default function Client({
             successAudioRef.current.play().catch(() => {});
         }
 
+        const presentedItem = currentItemRef.current;
+        if (presentedItem && usersRef.current[currentTurnRef.current]?.id !== LOCAL_USER_ID) {
+            const memory = memoryByItemRef.current[presentedItem.id];
+            if (memory) {
+                const now = new Date().toISOString();
+                const exposed = { ...memory, lastPresentedAt: now, updatedAt: now };
+                memoryByItemRef.current = { ...memoryByItemRef.current, [presentedItem.id]: exposed };
+                pendingMemoryRef.current.set(presentedItem.id, exposed);
+                setMemoryByItem(memoryByItemRef.current);
+            }
+        }
         setCurrentInput("");
         previousInputAtRef.current = null;
         previousInputLengthRef.current = 0;
@@ -704,34 +638,28 @@ export default function Client({
     ]);
 
     useEffect(() => {
-        if (
-            !memoryReady ||
-            !isStarted ||
-            result !== null
-        ) {
-            return;
-        }
+        bombPlanRef.current = {
+            duration: (currentTurnPlan?.retrievalWindowMs ?? 18_000) *
+                (currentTurnPlan?.bombPressure === "low" ? 1.35 : 1),
+            paused: !currentItem || currentTurnPlan?.bombPressure === "paused" || recallPressurePaused,
+        };
+    }, [currentItem, currentTurnPlan, recallPressurePaused]);
 
-        if (
-            currentTurnPlan?.bombPressure === "paused" ||
-            recallPressurePaused
-        ) {
-            return;
-        }
-
-        const baseDuration =
-            currentTurnPlan?.retrievalWindowMs ?? 18_000;
-        const pressureMultiplier =
-            currentTurnPlan?.bombPressure === "low"
-                ? 1.35
-                : 1;
-        const duration = Math.round(
-            baseDuration *
-                pressureMultiplier *
-                (0.94 + Math.random() * 0.12),
-        );
-
-        const timer = setTimeout(() => {
+    useEffect(() => {
+        if (!memoryReady || !isStarted || result !== null) return;
+        let previousTick = performance.now();
+        const jitter = 0.94 + Math.random() * 0.12;
+        const timer = setInterval(() => {
+            const now = performance.now();
+            const elapsed = now - previousTick;
+            previousTick = now;
+            const duration = bombPlanRef.current.duration * jitter;
+            bombStageProgressRef.current = advanceBombClock(
+                bombStageProgressRef.current, elapsed, duration,
+                bombPlanRef.current.paused || document.visibilityState === "hidden",
+            );
+            if (bombStageProgressRef.current < 1) return;
+            bombStageProgressRef.current = 0;
             if (bombStatus === 4) {
                 const lostUser =
                     usersRef.current[currentTurnRef.current];
@@ -758,6 +686,7 @@ export default function Client({
                         success: false,
                         answerLength: item.answer.length,
                         firstAttemptCorrect: false,
+                        reviewContext: currentReviewContextRef.current,
                     });
                 }
 
@@ -792,9 +721,9 @@ export default function Client({
             }
 
             setBombStatus((previous) => previous + 1);
-        }, duration);
+        }, 200);
 
-        return () => clearTimeout(timer);
+        return () => clearInterval(timer);
     }, [
         bombStatus,
         explode,
@@ -805,8 +734,6 @@ export default function Client({
         result,
         room.id,
         updateLocalMemory,
-        currentTurnPlan,
-        recallPressurePaused,
     ]);
 
     useEffect(() => {
@@ -935,6 +862,7 @@ export default function Client({
             currentTurn={currentTurn}
             bombStatus={bombStatus}
             currentItem={currentItem}
+            itemPresentationKey={sessionTurnNumberRef.current}
             currentInput={currentInput}
             isStarted={isStarted}
             serverError={memoryError}
@@ -966,13 +894,16 @@ export default function Client({
                 });
             }}
             resultExtraActions={
+                <>
+                {saveError && <p role="status">学習データは保存待ちです。接続が戻ると再送します。</p>}
                 <Button
                     iconName="link"
                     className="w-full"
-                    onClick={() => router.push("/room")}
+                    onClick={() => { void flushPendingMemory().finally(() => router.push("/room")); }}
                 >
                     別のルームを選択
                 </Button>
+                </>
             }
         />
     );

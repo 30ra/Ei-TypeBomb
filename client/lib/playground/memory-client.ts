@@ -5,7 +5,7 @@ import type { ItemMemoryState } from "@/lib/playground/memory";
 import { toMemoryState } from "@/lib/playground/memory";
 
 const MEMORY_COLUMNS =
-    "user_id, room_id, id, stability, difficulty, review_count, last_reviewed_at, created_at, updated_at";
+    "user_id, room_id, id, stability, difficulty, review_count, last_reviewed_at, created_at, updated_at, learning_state, last_presented_at";
 
 export const loadPlaygroundMemory = async (roomId: string) => {
     const supabase = createClient();
@@ -64,6 +64,8 @@ export const syncPlaygroundMemory = async (
         review_count: item.reviewCount,
         last_reviewed_at: item.lastReviewedAt,
         updated_at: item.updatedAt ?? new Date().toISOString(),
+        learning_state: item.learningState ?? null,
+        last_presented_at: item.lastPresentedAt ?? null,
     }));
 
     const { error } = await supabase

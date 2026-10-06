@@ -23,6 +23,7 @@ type Props = {
     currentTurn: number;
     bombStatus: number;
     currentItem: Item | null;
+    itemPresentationKey?: number;
     currentInput: string;
     isStarted: boolean;
     isSpectator?: boolean;
@@ -60,6 +61,7 @@ export default function GameView({
     currentTurn,
     bombStatus,
     currentItem,
+    itemPresentationKey = 0,
     currentInput,
     isStarted,
     isSpectator = false,
@@ -128,6 +130,7 @@ export default function GameView({
                     </div>
                 ) : null}
                 <ItemView
+                    key={`${currentItem.id}:${currentTurn}:${itemPresentationKey}`}
                     item={currentItem}
                     hasDuplicatePrompt={hasDuplicatePrompt}
                     bombStatus={bombStatus}
