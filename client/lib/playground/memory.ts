@@ -374,12 +374,20 @@ export const chooseNextItem = ({
         return supportedSessionItems[0];
     }
 
-    const longTermItems = items
-        .filter(
-            (item) =>
-                !sessionByItem[item.id] &&
-                (memoryByItem[item.id]?.reviewCount ?? 0) > 0,
-        )
+    const dueLongTermItems = items
+        .filter((item) => {
+            const session = sessionByItem[item.id];
+            const memory = memoryByItem[item.id];
+            if (
+                (session && session.phase !== "graduated") ||
+                !memory ||
+                memory.reviewCount === 0
+            ) {
+                return false;
+            }
+
+            return getRetrievability(memory) < 0.8;
+        })
         .filter(notRecentlySeen)
         .map((item) => ({
             item,
@@ -391,8 +399,8 @@ export const chooseNextItem = ({
         }))
         .sort((a, b) => b.score - a.score);
 
-    if (longTermItems.length > 0) {
-        return longTermItems[0].item;
+    if (dueLongTermItems.length > 0) {
+        return dueLongTermItems[0].item;
     }
 
     if (activeCount < MAX_ACTIVE_LEARNING_ITEMS) {
