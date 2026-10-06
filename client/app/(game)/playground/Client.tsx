@@ -461,7 +461,6 @@ export default function Client({
                 const recommendStop = shouldRecommendStop({
                     items,
                     memoryByItem: memoryByItemRef.current,
-                    recentItemIds: recentItemIdsRef.current,
                     userReviewCount:
                         userReviewCountRef.current,
                     sessionStartedAt:
