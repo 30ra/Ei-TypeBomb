@@ -13,6 +13,7 @@ import type {
 } from "@/lib/playground/memory";
 
 const DEFAULT_CUE_STEPS = [0.2, 0.4, 0.7, 1];
+const DEFAULT_HINT_DELAYS_MS = [1_000, 1_500, 2_000, 2_500];
 
 const isSoundEffectsEnabled = () => {
     if (typeof document === "undefined") return true;
@@ -38,7 +39,7 @@ function TypingAttempt({
     learningMode,
     initialCueRatio = 0,
     cueSteps = DEFAULT_CUE_STEPS,
-    stallMs = 5_000,
+    hintDelaysMs = DEFAULT_HINT_DELAYS_MS,
     onRecallProgress,
     onRecallComplete,
 }: {
@@ -53,7 +54,7 @@ function TypingAttempt({
     learningMode?: LearningMode;
     initialCueRatio?: number;
     cueSteps?: number[];
-    stallMs?: number | null;
+    hintDelaysMs?: number[] | null;
     onRecallProgress?: (progress: RecallProgress) => void;
     onRecallComplete?: (observation: RecallObservation) => void;
 }) {
@@ -84,7 +85,9 @@ function TypingAttempt({
     const incorrectInputCountRef = useRef(0);
     const maxCorrectPrefixRef = useRef(0);
     const lastCorrectProgressAtRef = useRef(0);
+    const lastHintAtRef = useRef(0);
     const cueStepsKey = cueSteps.join(",");
+    const hintDelaysKey = hintDelaysMs?.join(",") ?? "disabled";
 
     const isReadonly = currentInput !== null;
 
@@ -107,71 +110,98 @@ function TypingAttempt({
         if (isReadonly || !english) return;
         revealedHintLengthRef.current = initialCueLength;
         lastCorrectProgressAtRef.current = performance.now();
+        lastHintAtRef.current = 0;
 
-        if (stallMs === null || initialCueRatio >= 1) return;
+        const activeHintDelays = hintDelaysMs;
+        if (
+            activeHintDelays === null ||
+            activeHintDelays.length === 0 ||
+            initialCueRatio >= 1
+        )
+            return;
 
         let cancelled = false;
         let timer: ReturnType<typeof setTimeout> | null = null;
+        let hintIndex = 0;
+
+        const getHintDelay = () =>
+            Math.max(
+                250,
+                activeHintDelays[
+                    Math.min(hintIndex, activeHintDelays.length - 1)
+                ] ?? 250,
+            );
 
         const schedule = () => {
             if (cancelled) return;
 
-            timer = setTimeout(
-                () => {
-                    const now = performance.now();
-                    const elapsedSinceProgress =
-                        now - lastCorrectProgressAtRef.current;
-
-                    if (elapsedSinceProgress >= stallMs) {
-                        const currentLength = revealedHintLengthRef.current;
-                        const prefixLength = correctPrefixLength(
-                            inputStateRef.current,
-                            english,
-                        );
-                        const nextRatio =
-                            cueSteps.find(
-                                (ratio) =>
-                                    ratio >
-                                    Math.max(currentLength, prefixLength) /
-                                        english.length,
-                            ) ?? 1;
-                        const nextLength = Math.min(
-                            english.length,
-                            Math.max(
-                                currentLength,
-                                Math.ceil(english.length * nextRatio),
-                                prefixLength,
-                            ),
-                        );
-                        if (nextLength > currentLength) {
-                            revealedHintLengthRef.current = nextLength;
-                            setRevealedHintLength(nextLength);
-                            setTimedHintCount((count) => count + 1);
-                            if (
-                                hintCoversError(
-                                    inputStateRef.current,
-                                    english,
-                                    nextLength,
-                                )
-                            ) {
-                                attemptCountRef.current += 1;
-                                inputStateRef.current = Array(
-                                    english.length,
-                                ).fill("");
-                                setInput(inputStateRef.current);
-                                setCurrentSelection(0);
-                                setCharInput("");
-                                setIsFailAnimating(true);
-                                onChangeInputRef.current("");
-                            }
-                        }
-                        lastCorrectProgressAtRef.current = now;
-                    }
-
-                    schedule();
-                },
-                Math.max(250, stallMs),
+            const now = performance.now();
+            const anchorAt = Math.max(
+                lastCorrectProgressAtRef.current,
+                lastHintAtRef.current,
             );
+            const waitMs = Math.max(25, anchorAt + getHintDelay() - now);
+
+            timer = setTimeout(() => {
+                if (cancelled) return;
+
+                const firedAt = performance.now();
+                const latestAnchorAt = Math.max(
+                    lastCorrectProgressAtRef.current,
+                    lastHintAtRef.current,
+                );
+
+                // Correct user progress may have happened while this timer was waiting.
+                if (firedAt - latestAnchorAt < getHintDelay()) {
+                    schedule();
+                    return;
+                }
+
+                const currentLength = revealedHintLengthRef.current;
+                if (currentLength >= english.length) return;
+
+                const prefixLength = correctPrefixLength(
+                    inputStateRef.current,
+                    english,
+                );
+                const nextRatio =
+                    cueSteps.find(
+                        (ratio) =>
+                            ratio >
+                            Math.max(currentLength, prefixLength) /
+                                english.length,
+                    ) ?? 1;
+                const nextLength = Math.min(
+                    english.length,
+                    Math.max(
+                        currentLength,
+                        Math.ceil(english.length * nextRatio),
+                        prefixLength,
+                    ),
+                );
+
+                if (nextLength <= currentLength) return;
+
+                revealedHintLengthRef.current = nextLength;
+                setRevealedHintLength(nextLength);
+                setTimedHintCount((count) => count + 1);
+                lastHintAtRef.current = firedAt;
+                hintIndex += 1;
+
+                if (
+                    hintCoversError(inputStateRef.current, english, nextLength)
+                ) {
+                    attemptCountRef.current += 1;
+                    inputStateRef.current = Array(english.length).fill("");
+                    setInput(inputStateRef.current);
+                    setCurrentSelection(0);
+                    setCharInput("");
+                    setIsFailAnimating(true);
+                    onChangeInputRef.current("");
+                }
+
+                if (nextLength < english.length) schedule();
+            }, waitMs);
         };
 
         schedule();
@@ -184,10 +214,11 @@ function TypingAttempt({
         cueSteps,
         cueStepsKey,
         english,
+        hintDelaysKey,
+        hintDelaysMs,
         initialCueLength,
         initialCueRatio,
         isReadonly,
-        stallMs,
         wordKey,
     ]);
     useEffect(() => {

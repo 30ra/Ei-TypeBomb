@@ -17,7 +17,7 @@ type Props = {
     learningMode?: LearningMode;
     initialCueRatio?: number;
     cueSteps?: number[];
-    stallMs?: number | null;
+    hintDelaysMs?: number[] | null;
     onRecallProgress?: (progress: RecallProgress) => void;
     onRecallComplete?: (observation: RecallObservation) => void;
 };
@@ -33,7 +33,7 @@ export default function TypedRecallView({
     learningMode,
     initialCueRatio,
     cueSteps,
-    stallMs,
+    hintDelaysMs,
     onRecallProgress,
     onRecallComplete,
 }: Readonly<Props>) {
@@ -50,7 +50,7 @@ export default function TypedRecallView({
             learningMode={learningMode}
             initialCueRatio={initialCueRatio}
             cueSteps={cueSteps}
-            stallMs={stallMs}
+            hintDelaysMs={hintDelaysMs}
             onRecallProgress={onRecallProgress}
             onRecallComplete={onRecallComplete}
         />

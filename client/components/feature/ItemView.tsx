@@ -17,7 +17,7 @@ type Props = {
     learningMode?: LearningMode;
     initialCueRatio?: number;
     cueSteps?: number[];
-    stallMs?: number | null;
+    hintDelaysMs?: number[] | null;
     onRecallProgress?: (progress: RecallProgress) => void;
     onRecallComplete?: (observation: RecallObservation) => void;
 };

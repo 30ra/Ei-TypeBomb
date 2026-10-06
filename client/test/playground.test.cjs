@@ -161,11 +161,16 @@ function simulate(
             });
             const id = scheduler.chooseBotItem(state, random);
             if (id !== null) {
-                assert(!state.retries[id]);
-                assert(
-                    !state.cycleQueue
+                const protectedForUpcomingRecall =
+                    Boolean(state.retries[id]) ||
+                    state.cycleQueue
                         .slice(0, scheduler.BOT_LOOKAHEAD)
-                        .includes(id),
+                        .includes(id);
+                // A protected BOT item is allowed only as the tiny-room
+                // fallback, where the user has already answered it.
+                assert(
+                    !protectedForUpcomingRecall ||
+                        (state.userAnswered[id] ?? 0) > 0,
                 );
                 scheduler.recordBotPresentation(state, id);
                 memories[id] = memory.recordAnswerExposure(memories[id], now);
@@ -340,6 +345,55 @@ test("bomb and hint helpers retain their independent behavior", () => {
     assert.equal(clock.advanceBombClock(0.5, 5000, 10000, true), 0.5);
     assert.equal(input.hintCoversError(["Y"], "Hello", 1), true);
     assert.equal(input.hintCoversError(["H"], "Hello", 1), false);
+});
+
+test("BOT fallback stays null only before the user has answered anything", () => {
+    const state = scheduler.createScheduler(["a", "b", "c"], () => 0);
+    assert.equal(scheduler.chooseBotItem(state, () => 0.5), null);
+});
+
+test("BOT fallback keeps the handoff alive after a user answer when every word is protected", () => {
+    const state = scheduler.createScheduler(["a", "b", "c"], () => 0);
+    const selected = scheduler.chooseNextUserItem(state, {}, () => 0);
+    scheduler.recordUserAnswer(
+        state,
+        memory.evaluateRecall(observation()),
+    );
+
+    // In a three-word room BOT_LOOKAHEAD protects the remaining cycle,
+    // while the answered word may also be unavailable to the strict pool.
+    // The fallback must still return an already answered word.
+    state.retries[selected.itemId] = {
+        itemId: selected.itemId,
+        earliestTurn: state.turn + 1,
+        latestTurn: state.turn + 4,
+        reason: "uncertain_recall",
+        successCount: 0,
+    };
+
+    for (let i = 0; i < 20; i++) {
+        const id = scheduler.chooseBotItem(state, rng(i + 1));
+        assert.notEqual(id, null);
+        assert((state.userAnswered[id] ?? 0) > 0);
+    }
+});
+
+test("BOT random fallback prefers non-protected words before protected answered words", () => {
+    const state = scheduler.createScheduler(["a", "b", "c", "d", "e"], () => 0);
+    state.userAnswered.a = 1;
+    state.lastBotItem = "a";
+    state.cycleQueue = ["b", "c", "d"];
+    state.retries.a = {
+        itemId: "a",
+        earliestTurn: 2,
+        latestTurn: 4,
+        reason: "uncertain_recall",
+        successCount: 0,
+    };
+
+    // b/c/d are lookahead-protected and a is retry-protected, leaving e as
+    // the safe random fallback.
+    assert.equal(scheduler.chooseBotItem(state, () => 0.75), "e");
 });
 
 // Exercise the real queue callback, including arrivals during an in-flight request.
