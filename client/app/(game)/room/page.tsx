@@ -9,20 +9,36 @@ import { PopUp } from "@/components/ui/PopUp";
 import { TurnstileChallenge } from "@/components/ui/TurnstileChallenge";
 import posthog from "posthog-js";
 
+type PlayMode = "online" | "playground";
+
+const pathForMode = (mode: PlayMode) =>
+    mode === "online" ? "/display-name" : "/playground";
+
 export default function Loading() {
     const [showCursor, setShowCursor] = useState(true);
     const [link, setLink] = useState("");
     const [error, setError] = useState("");
     const [showPasswordField, setShowPasswordField] = useState(false);
-    const [loading, setLoading] = useState(false);
+    const [loadingMode, setLoadingMode] = useState<PlayMode | null>(null);
     const [roomPassword, setRoomPassword] = useState("");
     const [turnstile, setTurnstile] = useState(false);
     const [roomId, setRoomId] = useState("");
+    const [selectedMode, setSelectedMode] = useState<PlayMode>("online");
 
     const router = useRouter();
 
+    const enterRoom = (mode: PlayMode, normalizedRoomId: string) => {
+        posthog.capture("room_entered", {
+            room_id: normalizedRoomId,
+            play_mode: mode,
+        });
+        router.push(pathForMode(mode));
+    };
+
     const handleSignIn = async (turnstileToken: string) => {
-        setLoading(true);
+        const mode = selectedMode;
+        setLoadingMode(mode);
+
         const result = await signInToRoom(
             {
                 id: roomId,
@@ -32,36 +48,41 @@ export default function Loading() {
         );
 
         if (result === null) {
-            posthog.capture("room_entered", { room_id: roomId });
-            router.push("/display-name");
+            enterRoom(mode, roomId);
         } else {
             posthog.capture("room_entry_failed", {
                 room_id: roomId,
                 reason: result,
+                play_mode: mode,
             });
             setError(result);
         }
-        setLoading(false);
+
+        setLoadingMode(null);
     };
 
     const handleTurnstileFail = (reason: string, errorCode?: string) => {
         setTurnstile(false);
+        setLoadingMode(null);
         posthog.capture("room_entry_failed", {
             room_id: roomId,
             reason,
             turnstile_error_code: errorCode,
+            play_mode: selectedMode,
         });
         setError(reason);
     };
 
-    const handleContinue = async () => {
+    const handleMode = async (mode: PlayMode) => {
+        setSelectedMode(mode);
+
         if (showPasswordField) {
             setError("");
             setTurnstile(true);
             return;
         }
 
-        setLoading(true);
+        setLoadingMode(mode);
         setError("");
 
         const roomResult = await prepareRoomJoin(
@@ -71,16 +92,20 @@ export default function Loading() {
         if (!roomResult) {
             posthog.capture("room_entry_failed", {
                 reason: "ルームが見つかりません。",
+                play_mode: mode,
             });
             setError("ルームが見つかりません。");
-            setLoading(false);
+            setLoadingMode(null);
             return;
         }
 
         if ("error" in roomResult && roomResult.error) {
-            posthog.capture("room_entry_failed", { reason: roomResult.error });
+            posthog.capture("room_entry_failed", {
+                reason: roomResult.error,
+                play_mode: mode,
+            });
             setError(roomResult.error);
-            setLoading(false);
+            setLoadingMode(null);
             return;
         }
 
@@ -89,12 +114,12 @@ export default function Loading() {
 
         if (roomResult.requiresPassword) {
             setShowPasswordField(true);
-            setLoading(false);
+            setLoadingMode(null);
             return;
         }
 
-        posthog.capture("room_entered", { room_id: normalizedRoomId });
-        router.push("/display-name");
+        enterRoom(mode, normalizedRoomId);
+        setLoadingMode(null);
     };
 
     useEffect(() => {
@@ -106,6 +131,9 @@ export default function Loading() {
             clearInterval(intervalId);
         };
     }, []);
+
+    const modeButtonsDisabled =
+        !link || (showPasswordField && !roomPassword) || loadingMode !== null;
 
     return (
         <div className="flex flex-col w-full max-w-md px-4 gap-4 items-center pt-16">
@@ -138,21 +166,32 @@ export default function Loading() {
                 </div>
             )}
 
-            <Button
-                onClick={() => handleContinue()}
-                className="w-full"
-                variant="primary"
-                disabled={!link || (showPasswordField && !roomPassword)}
-                loading={loading}
-                iconName="arrowRight"
-            >
-                続ける
-            </Button>
+            <div className="grid grid-cols-2 gap-4 w-full">
+                <Button
+                    onClick={() => handleMode("online")}
+                    className="w-full"
+                    variant="primary"
+                    disabled={modeButtonsDisabled}
+                    loading={loadingMode === "online"}
+                    iconName="usersRound"
+                >
+                    オンラインプレイ
+                </Button>
+                <Button
+                    onClick={() => handleMode("playground")}
+                    className="w-full"
+                    disabled={modeButtonsDisabled}
+                    loading={loadingMode === "playground"}
+                    iconName="user"
+                >
+                    一人で練習
+                </Button>
+            </div>
 
             {!link && (
                 <Button
                     onClick={() => router.push("/game-demo")}
-                    className={`w-full`}
+                    className="w-full"
                     iconName="play"
                 >
                     デモをプレイ
@@ -169,7 +208,7 @@ export default function Loading() {
                 <TurnstileChallenge
                     onSuccess={(turnstileToken: string) => {
                         setTurnstile(false);
-                        handleSignIn(turnstileToken);
+                        void handleSignIn(turnstileToken);
                     }}
                     onFail={handleTurnstileFail}
                     onCancel={() => setTurnstile(false)}
