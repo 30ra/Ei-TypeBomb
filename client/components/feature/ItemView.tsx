@@ -1,5 +1,9 @@
 import TypedRecallView from "@/components/feature/TypedRecallView";
 import type { Item } from "@/type";
+import type {
+    RecallObservation,
+    RecallProgress,
+} from "@/lib/playground/memory";
 
 type Props = {
     item: Item;
@@ -9,6 +13,9 @@ type Props = {
     onSuccess: () => void;
     onChangeInput: (input: string) => void;
     enableRemoteTypingSync?: boolean;
+    hintIntervalsMs?: number[];
+    onRecallProgress?: (progress: RecallProgress) => void;
+    onRecallComplete?: (observation: RecallObservation) => void;
 };
 
 export default function ItemView(props: Readonly<Props>) {
