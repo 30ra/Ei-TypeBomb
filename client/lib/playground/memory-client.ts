@@ -5,7 +5,7 @@ import type { ItemMemoryState } from "@/lib/playground/memory";
 import { toMemoryState } from "@/lib/playground/memory";
 
 const MEMORY_COLUMNS =
-    "user_id, room_id, item_id, stability, difficulty, review_count, last_reviewed_at, created_at, updated_at";
+    "user_id, room_id, id, stability, difficulty, review_count, last_reviewed_at, created_at, updated_at";
 
 export const loadPlaygroundMemory = async (roomId: string) => {
     const supabase = createClient();
@@ -58,7 +58,7 @@ export const syncPlaygroundMemory = async (
     const rows = memory.map((item) => ({
         user_id: item.userId,
         room_id: item.roomId,
-        item_id: item.itemId,
+        id: item.itemId,
         stability: item.stability,
         difficulty: item.difficulty,
         review_count: item.reviewCount,
@@ -69,7 +69,7 @@ export const syncPlaygroundMemory = async (
     const { error } = await supabase
         .from("ei_typebomb_item_memory")
         .upsert(rows, {
-            onConflict: "user_id,room_id,item_id",
+            onConflict: "user_id,room_id,id",
         });
 
     return error;
