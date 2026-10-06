@@ -8,6 +8,7 @@ type Props = {
     hasDuplicatePrompt?: boolean;
     onSuccess: () => void;
     onChangeInput: (input: string) => void;
+    enableRemoteTypingSync?: boolean;
 };
 
 export default function TypedRecallView({
@@ -17,6 +18,7 @@ export default function TypedRecallView({
     hasDuplicatePrompt = false,
     onSuccess,
     onChangeInput,
+    enableRemoteTypingSync = true,
 }: Readonly<Props>) {
     return (
         <TypingView
@@ -27,6 +29,7 @@ export default function TypedRecallView({
             onSuccess={onSuccess}
             onChangeInput={onChangeInput}
             currentInput={currentInput}
+            enableRemoteTypingSync={enableRemoteTypingSync}
         />
     );
 }
