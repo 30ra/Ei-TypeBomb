@@ -6,6 +6,7 @@ import UsersView from "@/components/feature/UsersView";
 import Button from "@/components/ui/Button";
 import type { Item, Position, Room, User } from "@/type";
 import type {
+    LearningMode,
     RecallObservation,
     RecallProgress,
 } from "@/lib/playground/memory";
@@ -22,6 +23,7 @@ type Props = {
     currentTurn: number;
     bombStatus: number;
     currentItem: Item | null;
+    itemPresentationKey?: number;
     currentInput: string;
     isStarted: boolean;
     isSpectator?: boolean;
@@ -41,7 +43,10 @@ type Props = {
     onStartGame?: () => void;
     onLeave?: () => void;
     enableRemoteTypingSync?: boolean;
-    hintIntervalsMs?: number[];
+    learningMode?: LearningMode;
+    initialCueRatio?: number;
+    cueSteps?: number[];
+    stallMs?: number | null;
     onRecallProgress?: (progress: RecallProgress) => void;
     onRecallComplete?: (observation: RecallObservation) => void;
     stopRecommended?: boolean;
@@ -56,6 +61,7 @@ export default function GameView({
     currentTurn,
     bombStatus,
     currentItem,
+    itemPresentationKey = 0,
     currentInput,
     isStarted,
     isSpectator = false,
@@ -75,7 +81,10 @@ export default function GameView({
     onStartGame,
     onLeave,
     enableRemoteTypingSync = true,
-    hintIntervalsMs,
+    learningMode,
+    initialCueRatio,
+    cueSteps,
+    stallMs,
     onRecallProgress,
     onRecallComplete,
     stopRecommended = false,
@@ -121,6 +130,7 @@ export default function GameView({
                     </div>
                 ) : null}
                 <ItemView
+                    key={`${currentItem.id}:${currentTurn}:${itemPresentationKey}`}
                     item={currentItem}
                     hasDuplicatePrompt={hasDuplicatePrompt}
                     bombStatus={bombStatus}
@@ -137,7 +147,10 @@ export default function GameView({
                               : currentInput
                     }
                     enableRemoteTypingSync={enableRemoteTypingSync}
-                    hintIntervalsMs={hintIntervalsMs}
+                    learningMode={learningMode}
+                    initialCueRatio={initialCueRatio}
+                    cueSteps={cueSteps}
+                    stallMs={stallMs}
                     onRecallProgress={onRecallProgress}
                     onRecallComplete={onRecallComplete}
                 />

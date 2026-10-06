@@ -1,25 +1,56 @@
-import type { Item } from "@/type";
-
 const DAY_MS = 86_400_000;
-
 const clamp = (value: number, min: number, max: number) =>
     Math.min(max, Math.max(min, value));
+export const MEMORY_MODEL_VERSION = "playground-v4";
+const INITIAL_ENCODING_STABILITY = 0.15;
+// Product hypotheses, not calibrated measures of human memory.
+export const RECENT_EXPOSURE_MS = 3_000;
+export const HEAVY_CUE_RATIO = 0.4;
+export const FAST_RECALL_LATENCY_MS = 2_500;
+export const FAST_READING_ALLOWANCE_MS = 2_000;
+export const SLOW_READING_ALLOWANCE_MS = 6_000;
+export const DEFAULT_EXPECTED_CHAR_MS = 220;
 
+export type SchedulerReason = "cycle" | "retry" | "long_term_due";
 export type RecallProgress = {
     attemptCount: number;
+    incorrectInputCount?: number;
     hintCount: number;
     revealedHintChars: number;
     maxCorrectPrefixLength: number;
     recallLatencyMs: number | null;
     elapsedMs: number;
 };
-
+export type RecallOutcome =
+    "encoding" | "free_recall" | "cued_recall" | "relearned";
 export type RecallObservation = RecallProgress & {
     success: boolean;
     answerLength: number;
     firstAttemptCorrect: boolean;
+    outcome?: RecallOutcome;
+    finalCueRatio?: number;
+    initialCueRatio?: number;
+    additionalHintCount?: number;
+    answerWasFullyRevealed?: boolean;
+    elapsedSincePresentationMs?: number | null;
+    expectedTypingMs?: number;
+    schedulerReason?: SchedulerReason;
 };
-
+export type AttemptEvaluation = {
+    memoryEvidence:
+        "strong_recall" | "recall" | "weak_recall" | "insufficient_evidence";
+    retryNeed: "none" | "confirm" | "short";
+    reason: "failed_recall" | "heavy_hint" | "uncertain_recall" | null;
+    independent: boolean;
+};
+// Read-only compatibility with existing JSON rows. Never used by the scheduler.
+export type PersistedLearningState = {
+    phase: "encoding" | "supported_recall" | "free_recall" | "graduated";
+    freeRecallSuccesses: number;
+    lastCueRatio: number;
+    relearningSinceLastFreeRecall: boolean;
+    cueSuccessStreak: number;
+};
 export type ItemMemoryState = {
     userId: string;
     roomId: string;
@@ -30,16 +61,99 @@ export type ItemMemoryState = {
     lastReviewedAt: string | null;
     createdAt?: string | null;
     updatedAt?: string | null;
+    learningState?: PersistedLearningState | null;
+    lastPresentedAt?: string | null;
 };
-
+export type LearningMode =
+    "encoding" | "supported_recall" | "free_recall" | "relearning";
 export type TurnPlan = {
+    mode: LearningMode;
     retrievalWindowMs: number;
-    hintIntervalsMs: number[];
     retrievability: number;
     difficulty: number;
+    initialCueRatio: number;
+    cueSteps: number[];
+    stallMs: number | null;
+    bombPressure: "paused" | "low" | "normal";
+    countsAsRecall: boolean;
 };
 
-const BASE_HINT_INTERVALS_MS = [6_000, 4_000, 3_000, 2_500];
+export const evaluateRecall = (
+    observation: RecallObservation,
+): AttemptEvaluation => {
+    const cue = Math.max(
+        observation.initialCueRatio ?? 0,
+        observation.finalCueRatio ??
+            observation.revealedHintChars /
+                Math.max(1, observation.answerLength),
+    );
+    const full = observation.answerWasFullyRevealed || cue >= 1;
+    const independent =
+        observation.elapsedSincePresentationMs == null ||
+        observation.elapsedSincePresentationMs >= RECENT_EXPOSURE_MS;
+    if (!observation.success || full)
+        return {
+            memoryEvidence: "insufficient_evidence",
+            retryNeed: "short",
+            reason: !observation.success ? "failed_recall" : "heavy_hint",
+            independent,
+        };
+    if (cue >= HEAVY_CUE_RATIO)
+        return {
+            memoryEvidence: "weak_recall",
+            retryNeed: "short",
+            reason: "heavy_hint",
+            independent,
+        };
+    if (!independent)
+        return {
+            memoryEvidence: "insufficient_evidence",
+            retryNeed: "confirm",
+            reason: "uncertain_recall",
+            independent,
+        };
+    if (cue > 0 || (observation.additionalHintCount ?? 0) > 0)
+        return {
+            memoryEvidence: "weak_recall",
+            retryNeed: "confirm",
+            reason: "uncertain_recall",
+            independent,
+        };
+    const expected =
+        observation.expectedTypingMs ??
+        observation.answerLength * DEFAULT_EXPECTED_CHAR_MS;
+    const errors =
+        observation.incorrectInputCount ??
+        Math.max(0, observation.attemptCount - 1);
+    const fast =
+        observation.recallLatencyMs !== null &&
+        observation.recallLatencyMs <= FAST_RECALL_LATENCY_MS &&
+        observation.elapsedMs <= FAST_READING_ALLOWANCE_MS + expected * 1.5;
+    if (errors === 0 && observation.firstAttemptCorrect && fast)
+        return {
+            memoryEvidence: "strong_recall",
+            retryNeed: "none",
+            reason: null,
+            independent,
+        };
+    // One promptly corrected typo is not a recall failure.
+    if (
+        errors <= 1 &&
+        observation.elapsedMs <= SLOW_READING_ALLOWANCE_MS + expected * 2
+    )
+        return {
+            memoryEvidence: "recall",
+            retryNeed: "none",
+            reason: null,
+            independent,
+        };
+    return {
+        memoryEvidence: "weak_recall",
+        retryNeed: "confirm",
+        reason: "uncertain_recall",
+        independent,
+    };
+};
 
 export const toMemoryState = (row: {
     user_id: string;
@@ -51,6 +165,8 @@ export const toMemoryState = (row: {
     last_reviewed_at: string;
     created_at?: string | null;
     updated_at?: string | null;
+    learning_state?: PersistedLearningState | null;
+    last_presented_at?: string | null;
 }): ItemMemoryState => ({
     userId: row.user_id,
     roomId: row.room_id,
@@ -61,6 +177,8 @@ export const toMemoryState = (row: {
     lastReviewedAt: row.last_reviewed_at ?? null,
     createdAt: row.created_at ?? null,
     updatedAt: row.updated_at ?? null,
+    learningState: row.learning_state ?? null,
+    lastPresentedAt: row.last_presented_at ?? null,
 });
 
 export const createInitialMemory = (
@@ -71,7 +189,7 @@ export const createInitialMemory = (
     userId,
     roomId,
     itemId,
-    stability: 0.35,
+    stability: INITIAL_ENCODING_STABILITY,
     difficulty: 5,
     reviewCount: 0,
     lastReviewedAt: null,
@@ -107,243 +225,80 @@ export const applyRecallObservation = ({
     itemId: string;
     now?: Date;
 }): ItemMemoryState => {
-    const current =
-        memory ?? createInitialMemory(userId, roomId, itemId);
-    const retrievability = getRetrievability(current, now.getTime());
-    const difficulty = clamp(current.difficulty, 1, 10);
-    const difficultyNormalized = (difficulty - 1) / 9;
-    const hintBurden = clamp(
-        observation.hintCount /
-            Math.max(1, Math.ceil(observation.answerLength / 3)),
-        0,
-        1,
-    );
-    const prefixRatio = clamp(
-        observation.maxCorrectPrefixLength /
-            Math.max(1, observation.answerLength),
-        0,
-        1,
-    );
-    const latencyPenalty =
-        observation.recallLatencyMs === null
-            ? 0
-            : clamp((observation.recallLatencyMs - 3_000) / 12_000, 0, 1);
-
+    const current = memory ?? createInitialMemory(userId, roomId, itemId);
+    const evaluation = evaluateRecall(observation);
     let stability = current.stability;
-    let nextDifficulty = difficulty;
-
-    if (observation.success) {
-        const quality = clamp(
-            1 -
-                hintBurden * 0.55 -
-                latencyPenalty * 0.15 +
-                prefixRatio * 0.1,
-            0.2,
-            1,
-        );
-        const spacingGain = 0.7 + (1 - retrievability) * 1.6;
-        const difficultyDrag = 1 - difficultyNormalized * 0.25;
-
-        if (current.reviewCount === 0) {
-            stability = 0.45 + quality * 0.75;
-        } else {
-            stability = Math.max(
-                0.12,
-                stability *
-                    (1 + spacingGain * quality * difficultyDrag),
-            );
-        }
-
-        nextDifficulty = clamp(
-            difficulty +
-                hintBurden * 0.6 +
-                latencyPenalty * 0.25 -
-                (observation.firstAttemptCorrect &&
-                observation.hintCount === 0
-                    ? 0.35
-                    : 0),
-            1,
-            10,
-        );
-    } else {
-        stability = Math.max(0.12, stability * 0.6);
-        nextDifficulty = clamp(difficulty + 0.8, 1, 10);
+    let difficulty = current.difficulty;
+    let lastReviewedAt = current.lastReviewedAt;
+    const iso = now.toISOString();
+    if (
+        !observation.success ||
+        observation.answerWasFullyRevealed ||
+        (observation.finalCueRatio ?? 0) >= 1
+    ) {
+        stability = Math.max(0.12, stability * 0.8);
+        difficulty = clamp(difficulty + 0.5, 1, 10);
+        lastReviewedAt = iso;
+    } else if (
+        evaluation.independent &&
+        evaluation.memoryEvidence !== "insufficient_evidence"
+    ) {
+        // Speed controls session repetition, not the magnitude of long-term gain.
+        const weight = evaluation.memoryEvidence === "weak_recall" ? 0.2 : 1;
+        const gain = current.lastReviewedAt
+            ? (1 - getRetrievability(current, now.getTime())) * 0.5 * weight
+            : 0;
+        stability = Math.max(0.12, stability * (1 + gain));
+        difficulty = clamp(difficulty + (weight === 1 ? -0.15 : 0.1), 1, 10);
+        lastReviewedAt = iso;
     }
-
-    const isoNow = now.toISOString();
-
     return {
         ...current,
         userId,
         roomId,
         itemId,
         stability,
-        difficulty: nextDifficulty,
+        difficulty,
         reviewCount: current.reviewCount + 1,
-        lastReviewedAt: isoNow,
-        updatedAt: isoNow,
+        lastReviewedAt,
+        lastPresentedAt: iso,
+        updatedAt: iso,
+        learningState: null,
     };
 };
 
-export const getItemPriority = ({
-    item,
-    memory,
-    recentItemIds,
-    now = Date.now(),
-}: {
-    item: Item;
-    memory: ItemMemoryState | undefined;
-    recentItemIds: string[];
-    now?: number;
-}) => {
-    const retrievability = getRetrievability(memory, now);
-    const difficulty = memory?.difficulty ?? 5;
-    const difficultyNormalized = (difficulty - 1) / 9;
-    const forgettingRisk = 1 - retrievability;
+export const recordAnswerExposure = (
+    memory: ItemMemoryState,
+    now = new Date(),
+): ItemMemoryState => ({
+    ...memory,
+    lastPresentedAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+});
 
-    const base =
-        !memory || memory.reviewCount === 0
-            ? 1.3
-            : 0.25 +
-              forgettingRisk * 0.75 +
-              difficultyNormalized * 0.25;
-
-    const recentDistance = [...recentItemIds]
-        .reverse()
-        .findIndex((id) => id === item.id);
-
-    const diversityFactor =
-        recentDistance === -1
-            ? 1
-            : recentDistance === 0
-              ? 0.05
-              : recentDistance <= 2
-                ? 0.2
-                : recentDistance <= 4
-                  ? 0.6
-                  : 1;
-
-    return base * diversityFactor;
-};
-
-export const chooseNextItem = ({
-    items,
-    memoryByItem,
-    recentItemIds,
-    activeRecall,
-}: {
-    items: Item[];
-    memoryByItem: Record<string, ItemMemoryState>;
-    recentItemIds: string[];
-    activeRecall: boolean;
-}) => {
-    if (items.length === 0) return null;
-    if (items.length === 1) return items[0];
-
-    const cooldown = new Set(recentItemIds.slice(-3));
-    const availableItems = items.some((item) => !cooldown.has(item.id))
-        ? items.filter((item) => !cooldown.has(item.id))
-        : items;
-
-    const ranked = availableItems
-        .map((item) => ({
-            item,
-            score: getItemPriority({
-                item,
-                memory: memoryByItem[item.id],
-                recentItemIds,
-            }),
-        }))
-        .sort((a, b) =>
-            activeRecall ? b.score - a.score : a.score - b.score,
-        );
-
-    return ranked[0]?.item ?? null;
-};
-
+// Every presentation starts as an unaided probe. Hints escalate only on a stall.
 export const createTurnPlan = (
     memory: ItemMemoryState | undefined,
-): TurnPlan => {
-    const retrievability = getRetrievability(memory);
-    const difficulty = memory?.difficulty ?? 5;
-    const difficultyNormalized = (difficulty - 1) / 9;
-    const supportNeed =
-        (1 - retrievability) * 0.55 + difficultyNormalized * 0.45;
-
-    const timingScale = clamp(0.9 + supportNeed * 0.25, 0.9, 1.15);
-    const hintIntervalsMs = BASE_HINT_INTERVALS_MS.map((interval) =>
-        Math.round(interval * timingScale),
-    );
-    const retrievalWindowMs = Math.round(
-        clamp(
-            15_000 +
-                difficultyNormalized * 5_000 +
-                (1 - retrievability) * 3_000,
-            15_000,
-            24_000,
-        ),
-    );
-
-    return {
-        retrievalWindowMs,
-        hintIntervalsMs,
-        retrievability,
-        difficulty,
-    };
-};
-
-export const getAdaptiveBombStageDurationMs = ({
-    items,
-    memoryByItem,
-}: {
-    items: Item[];
-    memoryByItem: Record<string, ItemMemoryState>;
-}) => {
-    if (items.length === 0) return 18_000;
-
-    const durations = items
-        .map((item) =>
-            createTurnPlan(memoryByItem[item.id]).retrievalWindowMs,
-        )
-        .sort((a, b) => a - b);
-    const median =
-        durations[Math.floor(durations.length / 2)] ?? 18_000;
-
-    return clamp(median, 15_000, 24_000);
-};
+): TurnPlan => ({
+    mode: "free_recall",
+    retrievalWindowMs: clamp(
+        18_000 + ((memory?.difficulty ?? 5) - 5) * 600,
+        12_000,
+        26_000,
+    ),
+    retrievability: getRetrievability(memory),
+    difficulty: memory?.difficulty ?? 5,
+    initialCueRatio: 0,
+    cueSteps: [0.2, 0.4, 0.7, 1],
+    stallMs: 4_000,
+    bombPressure: "normal",
+    countsAsRecall: true,
+});
 
 export const shouldRecommendStop = ({
-    items,
-    memoryByItem,
-    userReviewCount,
     sessionStartedAt,
     now = Date.now(),
 }: {
-    items: Item[];
-    memoryByItem: Record<string, ItemMemoryState>;
-    userReviewCount: number;
     sessionStartedAt: number;
     now?: number;
-}) => {
-    if (now - sessionStartedAt >= 15 * 60_000) return true;
-
-    const minimumReviews = Math.min(
-        Math.max(4, items.length),
-        8,
-    );
-    if (userReviewCount < minimumReviews) return false;
-
-    const highestRemainingValue = Math.max(
-        ...items.map((item) =>
-            getItemPriority({
-                item,
-                memory: memoryByItem[item.id],
-                recentItemIds: [],
-                now,
-            }),
-        ),
-        0,
-    );
-
-    return highestRemainingValue < 0.48;
-};
+}) => now - sessionStartedAt >= 15 * 60_000;
