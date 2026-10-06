@@ -44,6 +44,8 @@ type Props = {
     hintIntervalsMs?: number[];
     onRecallProgress?: (progress: RecallProgress) => void;
     onRecallComplete?: (observation: RecallObservation) => void;
+    stopRecommended?: boolean;
+    onStop?: () => void;
 };
 
 export default function GameView({
@@ -76,6 +78,8 @@ export default function GameView({
     hintIntervalsMs,
     onRecallProgress,
     onRecallComplete,
+    stopRecommended = false,
+    onStop,
 }: Readonly<Props>) {
     const currentTurnUser = users[currentTurn] as User | undefined;
     const isParticipant = users.some((user) => user.id === userId);
@@ -153,14 +157,34 @@ export default function GameView({
                                 ? "あなたの負けです"
                                 : `${lostDisplayName ?? "相手"}の負けです`}
                         </div>
-                        <Button
-                            iconName="rotateCw"
-                            className="w-full"
-                            variant="primary"
-                            onClick={onPlayAgain}
-                        >
-                            もう一度プレイ
-                        </Button>
+                        {stopRecommended && onStop ? (
+                            <>
+                                <Button
+                                    iconName="check"
+                                    className="w-full"
+                                    variant="primary"
+                                    onClick={onStop}
+                                >
+                                    ここで一区切り
+                                </Button>
+                                <Button
+                                    iconName="rotateCw"
+                                    className="w-full"
+                                    onClick={onPlayAgain}
+                                >
+                                    続ける
+                                </Button>
+                            </>
+                        ) : (
+                            <Button
+                                iconName="rotateCw"
+                                className="w-full"
+                                variant="primary"
+                                onClick={onPlayAgain}
+                            >
+                                もう一度プレイ
+                            </Button>
+                        )}
                         <Button
                             iconName="plus"
                             className="w-full"
