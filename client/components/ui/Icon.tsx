@@ -38,6 +38,8 @@ import {
     Loader,
     Loader2,
     ChevronsUpDown,
+    GlobeOff,
+    ServerOff,
 } from "lucide-react";
 
 const icons: Record<string, LucideIcon> = {
@@ -79,6 +81,8 @@ const icons: Record<string, LucideIcon> = {
     loader: Loader,
     loaderCircle: Loader2,
     chevronsUpDown: ChevronsUpDown,
+    globeOff: GlobeOff,
+    serverOff: ServerOff,
 };
 
 export type IconName = keyof typeof icons;
