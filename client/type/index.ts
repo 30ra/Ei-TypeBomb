@@ -17,15 +17,7 @@ export type Room = {
     userId?: string;
     title?: string;
     explanation?: string;
-    /**
-     * Canonical in-app content model. New gameplay code should read this.
-     */
     items?: Item[];
-    /**
-     * Legacy wire/storage shape kept while existing rooms and servers migrate.
-     * Normalize through getRoomItems() before gameplay code consumes it.
-     */
-    words?: LegacyWord[];
     maxPlayers?: number;
     gameDuration?: number;
     password?: string | null;
