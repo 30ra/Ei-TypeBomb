@@ -1,6 +1,7 @@
 import TypingView from "@/components/feature/InputView";
 import type { TypedRecallItem } from "@/type";
 import type {
+    LearningMode,
     RecallObservation,
     RecallProgress,
 } from "@/lib/playground/memory";
@@ -13,7 +14,10 @@ type Props = {
     onSuccess: () => void;
     onChangeInput: (input: string) => void;
     enableRemoteTypingSync?: boolean;
-    hintIntervalsMs?: number[];
+    learningMode?: LearningMode;
+    initialCueRatio?: number;
+    cueSteps?: number[];
+    stallMs?: number | null;
     onRecallProgress?: (progress: RecallProgress) => void;
     onRecallComplete?: (observation: RecallObservation) => void;
 };
@@ -26,7 +30,10 @@ export default function TypedRecallView({
     onSuccess,
     onChangeInput,
     enableRemoteTypingSync = true,
-    hintIntervalsMs,
+    learningMode,
+    initialCueRatio,
+    cueSteps,
+    stallMs,
     onRecallProgress,
     onRecallComplete,
 }: Readonly<Props>) {
@@ -40,7 +47,10 @@ export default function TypedRecallView({
             onChangeInput={onChangeInput}
             currentInput={currentInput}
             enableRemoteTypingSync={enableRemoteTypingSync}
-            hintIntervalsMs={hintIntervalsMs}
+            learningMode={learningMode}
+            initialCueRatio={initialCueRatio}
+            cueSteps={cueSteps}
+            stallMs={stallMs}
             onRecallProgress={onRecallProgress}
             onRecallComplete={onRecallComplete}
         />
