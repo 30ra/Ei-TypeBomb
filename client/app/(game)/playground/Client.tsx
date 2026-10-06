@@ -23,6 +23,7 @@ import {
     type ItemMemoryState,
     type RecallObservation,
     type RecallProgress,
+    type SessionLearningState,
 } from "@/lib/playground/memory";
 import {
     loadPlaygroundMemory,
@@ -108,6 +109,13 @@ export default function Client({
         useState(false);
 
     const recentItemIdsRef = useRef<string[]>([]);
+    const sessionByItemRef = useRef<Record<string, SessionLearningState>>(
+        {},
+    );
+    const [sessionByItem, setSessionByItem] = useState<
+        Record<string, SessionLearningState>
+    >({});
+    const sessionTurnNumberRef = useRef(0);
     const recallProgressRef = useRef<RecallProgress | null>(null);
     const userReviewCountRef = useRef(0);
     const sessionStartedAtRef = useRef(Date.now());
@@ -196,10 +204,37 @@ export default function Client({
         setRecallPressurePaused(false);
 
         if (item) {
+            sessionTurnNumberRef.current += 1;
             recentItemIdsRef.current = [
                 ...recentItemIdsRef.current,
                 item.id,
             ].slice(-12);
+
+            const isLocalTurn =
+                usersRef.current[currentTurnRef.current]?.id ===
+                LOCAL_USER_ID;
+            const memory = memoryByItemRef.current[item.id];
+
+            if (
+                isLocalTurn &&
+                !sessionByItemRef.current[item.id] &&
+                (!memory || memory.reviewCount === 0)
+            ) {
+                const nextSessionState: SessionLearningState = {
+                    phase: "encoding",
+                    freeRecallSuccesses: 0,
+                    lastFreeRecallTurn: null,
+                    lastSeenTurn: sessionTurnNumberRef.current,
+                    lastCueRatio: 1,
+                    relearningSinceLastFreeRecall: false,
+                    cueSuccessStreak: 0,
+                };
+                sessionByItemRef.current = {
+                    ...sessionByItemRef.current,
+                    [item.id]: nextSessionState,
+                };
+                setSessionByItem(sessionByItemRef.current);
+            }
         }
     }, []);
 
@@ -211,6 +246,8 @@ export default function Client({
                 recentItemIds: recentItemIdsRef.current,
                 activeRecall:
                     usersRef.current[turnIndex]?.id === LOCAL_USER_ID,
+                sessionByItem: sessionByItemRef.current,
+                currentTurnNumber: sessionTurnNumberRef.current,
             }),
         [items],
     );
@@ -286,6 +323,141 @@ export default function Client({
         users.length,
     ]);
 
+    const updateSessionLearning = useCallback(
+        (item: Item, observation: RecallObservation) => {
+            const current = sessionByItemRef.current[item.id];
+            const finalCueRatio =
+                observation.finalCueRatio ??
+                observation.revealedHintChars /
+                    Math.max(1, observation.answerLength);
+            const outcome =
+                observation.outcome ??
+                (observation.success
+                    ? finalCueRatio === 0
+                        ? "free_recall"
+                        : finalCueRatio >= 1
+                          ? "relearned"
+                          : "cued_recall"
+                    : "relearned");
+
+            // Existing long-term items stay in the long-term scheduler
+            // unless they genuinely fail and need relearning.
+            if (
+                !current &&
+                outcome !== "encoding" &&
+                outcome !== "relearned"
+            ) {
+                return;
+            }
+
+            let next: SessionLearningState =
+                current ?? {
+                    phase: "supported_recall",
+                    freeRecallSuccesses: 0,
+                    lastFreeRecallTurn: null,
+                    lastSeenTurn: sessionTurnNumberRef.current,
+                    lastCueRatio: 0.6,
+                    relearningSinceLastFreeRecall: false,
+                    cueSuccessStreak: 0,
+                };
+
+            if (outcome === "encoding") {
+                next = {
+                    ...next,
+                    phase: "supported_recall",
+                    freeRecallSuccesses: 0,
+                    lastFreeRecallTurn: null,
+                    lastSeenTurn: sessionTurnNumberRef.current,
+                    lastCueRatio: 0.5,
+                    relearningSinceLastFreeRecall: false,
+                    cueSuccessStreak: 0,
+                };
+            } else if (
+                outcome === "relearned" ||
+                !observation.success
+            ) {
+                next = {
+                    ...next,
+                    phase: "supported_recall",
+                    freeRecallSuccesses: 0,
+                    lastFreeRecallTurn: null,
+                    lastSeenTurn: sessionTurnNumberRef.current,
+                    lastCueRatio: 0.6,
+                    relearningSinceLastFreeRecall: true,
+                    cueSuccessStreak: 0,
+                };
+            } else if (outcome === "cued_recall") {
+                if (finalCueRatio <= 0.2) {
+                    next = {
+                        ...next,
+                        phase: "free_recall",
+                        freeRecallSuccesses: 0,
+                        lastFreeRecallTurn: null,
+                        lastSeenTurn: sessionTurnNumberRef.current,
+                        lastCueRatio: 0,
+                        relearningSinceLastFreeRecall: false,
+                        cueSuccessStreak: 0,
+                    };
+                } else {
+                    const streak = next.cueSuccessStreak + 1;
+                    const canReduceCue = streak >= 2;
+                    const reducedCue =
+                        finalCueRatio > 0.4
+                            ? 0.4
+                            : finalCueRatio > 0.2
+                              ? 0.2
+                              : 0;
+
+                    next = {
+                        ...next,
+                        phase:
+                            canReduceCue && reducedCue === 0
+                                ? "free_recall"
+                                : "supported_recall",
+                        freeRecallSuccesses: 0,
+                        lastFreeRecallTurn: null,
+                        lastSeenTurn: sessionTurnNumberRef.current,
+                        lastCueRatio: canReduceCue
+                            ? reducedCue
+                            : finalCueRatio,
+                        relearningSinceLastFreeRecall: false,
+                        cueSuccessStreak: canReduceCue ? 0 : streak,
+                    };
+                }
+            } else if (outcome === "free_recall") {
+                const separatedEnough =
+                    next.lastFreeRecallTurn === null ||
+                    sessionTurnNumberRef.current -
+                        next.lastFreeRecallTurn >=
+                        4;
+                const nextSuccesses =
+                    separatedEnough &&
+                    !next.relearningSinceLastFreeRecall
+                        ? next.freeRecallSuccesses + 1
+                        : 1;
+                const graduated = nextSuccesses >= 2;
+
+                next = {
+                    ...next,
+                    phase: graduated ? "graduated" : "free_recall",
+                    freeRecallSuccesses: nextSuccesses,
+                    lastFreeRecallTurn: sessionTurnNumberRef.current,
+                    lastSeenTurn: sessionTurnNumberRef.current,
+                    lastCueRatio: 0,
+                    relearningSinceLastFreeRecall: false,
+                    cueSuccessStreak: 0,
+                };
+            }
+
+            sessionByItemRef.current = {
+                ...sessionByItemRef.current,
+                [item.id]: next,
+            };
+            setSessionByItem(sessionByItemRef.current);
+        },
+        [],
+    );
+
     const updateLocalMemory = useCallback(
         (
             item: Item,
@@ -293,6 +465,8 @@ export default function Client({
         ) => {
             const userId = authenticatedUserIdRef.current;
             if (!userId) return;
+
+            updateSessionLearning(item, observation);
 
             const nextMemory = applyRecallObservation({
                 memory: memoryByItemRef.current[item.id],
@@ -323,11 +497,16 @@ export default function Client({
                 max_correct_prefix_length:
                     observation.maxCorrectPrefixLength,
                 attempt_count: observation.attemptCount,
+                recall_outcome: observation.outcome,
+                final_cue_ratio: observation.finalCueRatio,
+                session_phase_after:
+                    sessionByItemRef.current[item.id]?.phase ??
+                    "long_term",
                 stability_after: nextMemory.stability,
                 difficulty_after: nextMemory.difficulty,
             });
         },
-        [room.id],
+        [room.id, updateSessionLearning],
     );
 
     const flushPendingMemory = useCallback(async () => {
@@ -466,11 +645,15 @@ export default function Client({
             return null;
         }
 
-        return createTurnPlan(memoryByItem[currentItem.id]);
+        return createTurnPlan(
+            memoryByItem[currentItem.id],
+            sessionByItem[currentItem.id],
+        );
     }, [
         currentItem,
         currentTurnUser?.id,
         memoryByItem,
+        sessionByItem,
     ]);
 
     useEffect(() => {
