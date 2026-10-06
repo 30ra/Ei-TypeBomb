@@ -7,6 +7,8 @@ import type {
     RecallProgress,
 } from "@/lib/playground/memory";
 
+const DEFAULT_CUE_STEPS = [0.2, 0.4, 0.7, 1];
+
 const correctPrefixLength = (input: string[], answer: string) => {
     let length = 0;
 
@@ -45,7 +47,7 @@ export default function TypingView({
     enableRemoteTypingSync = true,
     learningMode,
     initialCueRatio = 0,
-    cueSteps = [0.2, 0.4, 0.7, 1],
+    cueSteps = DEFAULT_CUE_STEPS,
     stallMs = 5_000,
     onRecallProgress,
     onRecallComplete,
@@ -203,6 +205,7 @@ export default function TypingView({
             if (timer) clearTimeout(timer);
         };
     }, [
+        cueSteps,
         cueStepsKey,
         english,
         initialCueLength,
