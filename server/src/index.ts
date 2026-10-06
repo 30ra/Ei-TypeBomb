@@ -20,7 +20,7 @@ import {
 class ClientError extends Error {}
 
 const MAX_DISPLAY_NAME_LENGTH = 50;
-// Keep in sync with the client's typing payload limit (maximum word length).
+// Keep in sync with the client's typing payload limit (maximum typed-recall answer length).
 const MAX_CURRENT_INPUT_LENGTH = 32;
 const INVALID_DISPLAY_NAME_CHARACTERS = /[\p{Cc}\p{Cf}]/u;
 
@@ -40,8 +40,8 @@ const validateDisplayName = (displayName: unknown): string => {
     return displayName;
 };
 
-const requireRoomWords = (room: Room) => {
-    if (!room.words?.length) {
+const requireRoomItems = (room: Room) => {
+    if (!room.items?.length) {
         throw new ClientError(
             "ルームに単語が設定されていません。単語を設定してから再度お試しください。",
         );
@@ -78,7 +78,7 @@ const createRoomIfNeeded = (roomId: string): Promise<Room | null> => {
     const loadPromise = (async () => {
         const room = await getRoomFromId(roomId);
         if (!room) return null;
-        requireRoomWords(room);
+        requireRoomItems(room);
 
         const roomAfterFetch = rooms.find((item) => item.id === roomId);
         if (roomAfterFetch) return roomAfterFetch;
@@ -246,7 +246,7 @@ io.on("connection", (socket) => {
                         "ルーム情報を取得できませんでした。ルームを確認して再度お試しください。",
                     );
                 }
-                requireRoomWords(room);
+                requireRoomItems(room);
 
                 const displayName = validateDisplayName(response.displayName);
 
@@ -299,8 +299,8 @@ io.on("connection", (socket) => {
         const previousHolder = currentUser;
         room.bombHolder = (room.bombHolder + 1) % room.users.length;
         const nextHolder = room.users[room.bombHolder];
-        if (room.words?.length)
-            room.wordIndex = Math.floor(Math.random() * room.words.length);
+        if (room.items?.length)
+            room.wordIndex = Math.floor(Math.random() * room.items.length);
         logEvent("GAME", `word passed in ${roomId}`, {
             roomId,
             gameId: room.gameId,
@@ -336,7 +336,7 @@ io.on("connection", (socket) => {
             if (!rooms.includes(room) || room.isStart || roomId !== room.id)
                 return;
             room.gameDuration = savedRoom.gameDuration;
-            requireRoomWords(room);
+            requireRoomItems(room);
         } catch (error) {
             reportError((error as ClientError).message, error);
             return;
@@ -376,9 +376,9 @@ io.on("connection", (socket) => {
             if (currentRoomIndex === -1) return;
             const currentRoom = rooms[currentRoomIndex];
             if (currentRoom.gameId !== gameId || !currentRoom.isStart) return;
-            if (currentRoom.words?.length)
+            if (currentRoom.items?.length)
                 currentRoom.wordIndex = Math.floor(
-                    Math.random() * currentRoom.words.length,
+                    Math.random() * currentRoom.items.length,
                 );
             sendInputUpdate(roomId, "");
             sendRoomInfo(roomId);
