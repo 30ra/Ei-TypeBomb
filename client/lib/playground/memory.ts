@@ -282,7 +282,7 @@ export const chooseNextItem = ({
     if (items.length === 0) return null;
     if (items.length === 1) return items[0];
 
-    const cooldown = new Set(recentItemIds.slice(-3));
+    const cooldown = new Set(recentItemIds.slice(-4));
     const availableItems = items.some((item) => !cooldown.has(item.id))
         ? items.filter((item) => !cooldown.has(item.id))
         : items;
