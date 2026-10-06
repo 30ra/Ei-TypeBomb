@@ -1,10 +1,11 @@
 "use client";
 
 import type { ReactNode, Ref } from "react";
-import TypingView from "@/components/feature/InputView";
+import ItemView from "@/components/feature/ItemView";
 import UsersView from "@/components/feature/UsersView";
 import Button from "@/components/ui/Button";
-import type { Position, Room, User, Word } from "@/type";
+import type { Item, Position, Room, User } from "@/type";
+import { getRoomItems } from "@/lib/item";
 
 type Props = {
     room: Room | null;
@@ -13,7 +14,7 @@ type Props = {
     userId: string | null;
     currentTurn: number;
     bombStatus: number;
-    currentWord: Word | null;
+    currentItem: Item | null;
     currentInput: string;
     isStarted: boolean;
     isSpectator?: boolean;
@@ -41,7 +42,7 @@ export default function GameView({
     userId,
     currentTurn,
     bombStatus,
-    currentWord,
+    currentItem,
     currentInput,
     isStarted,
     isSpectator = false,
@@ -63,17 +64,20 @@ export default function GameView({
 }: Readonly<Props>) {
     const currentTurnUser = users[currentTurn] as User | undefined;
     const isParticipant = users.some((user) => user.id === userId);
-    const hasDuplicateMeaning =
-        currentWord !== null &&
-        (room?.words?.filter((word) => word.jp === currentWord.jp).length ??
-            0) > 1;
+    const hasDuplicatePrompt =
+        currentItem?.type === "typed_recall" &&
+        getRoomItems(room).filter(
+            (item) =>
+                item.type === "typed_recall" &&
+                item.prompt === currentItem.prompt,
+        ).length > 1;
     const roomHasSpace =
         typeof room?.maxPlayers === "number" &&
         room.maxPlayers > 0 &&
         users.length < room.maxPlayers;
 
     const activeGame =
-        currentWord === null ? (
+        currentItem === null ? (
             <div
                 className="font-mono w-fit font-bold text-2xl"
                 data-cursor="text"
@@ -97,10 +101,9 @@ export default function GameView({
                         {currentTurnUser.displayName + "の番です"}
                     </div>
                 ) : null}
-                <TypingView
-                    hasDuplicateMeaning={hasDuplicateMeaning}
-                    japanese={currentWord.jp}
-                    english={currentWord.en}
+                <ItemView
+                    item={currentItem}
+                    hasDuplicatePrompt={hasDuplicatePrompt}
                     bombStatus={bombStatus}
                     onSuccess={onSuccess}
                     onChangeInput={(input) => {
