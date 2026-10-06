@@ -5,6 +5,10 @@ import ItemView from "@/components/feature/ItemView";
 import UsersView from "@/components/feature/UsersView";
 import Button from "@/components/ui/Button";
 import type { Item, Position, Room, User } from "@/type";
+import type {
+    RecallObservation,
+    RecallProgress,
+} from "@/lib/playground/memory";
 import { getRoomItems } from "@/lib/item";
 import GameNotice, {
     type GameNoticeProps,
@@ -37,6 +41,9 @@ type Props = {
     onStartGame?: () => void;
     onLeave?: () => void;
     enableRemoteTypingSync?: boolean;
+    hintIntervalsMs?: number[];
+    onRecallProgress?: (progress: RecallProgress) => void;
+    onRecallComplete?: (observation: RecallObservation) => void;
 };
 
 export default function GameView({
@@ -66,6 +73,9 @@ export default function GameView({
     onStartGame,
     onLeave,
     enableRemoteTypingSync = true,
+    hintIntervalsMs,
+    onRecallProgress,
+    onRecallComplete,
 }: Readonly<Props>) {
     const currentTurnUser = users[currentTurn] as User | undefined;
     const isParticipant = users.some((user) => user.id === userId);
@@ -123,6 +133,9 @@ export default function GameView({
                               : currentInput
                     }
                     enableRemoteTypingSync={enableRemoteTypingSync}
+                    hintIntervalsMs={hintIntervalsMs}
+                    onRecallProgress={onRecallProgress}
+                    onRecallComplete={onRecallComplete}
                 />
             </div>
         );
