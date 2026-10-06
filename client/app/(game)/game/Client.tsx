@@ -5,12 +5,13 @@ import { useRouter } from "next/navigation";
 import { io } from "@/lib/room/socket";
 import { useBombExplosion } from "@/components/feature/BombExplosion";
 import GameView from "@/components/feature/GameView";
-import { Item, Room, User } from "@/type";
+import { Item, LegacyWord, Room, User } from "@/type";
 import { getAuthToken } from "@/lib/room/auth";
 import { isTrustedServerUrl, resolveServerUrl } from "@/lib/room/serverUrl";
 import { Position } from "@/type";
 import { newPositions } from "@/lib/ui/position";
 import posthog from "posthog-js";
+import { legacyWireWordsToItems } from "@/lib/item";
 
 type Props = {
     initialBackgroundMusic: boolean;
@@ -225,6 +226,7 @@ export default function Clinet({
                 "room:broadcast",
                 (
                     newRoom: Room & {
+                        words?: LegacyWord[];
                         users: User[];
                         isStart: boolean;
                         bombHolder: number;
@@ -234,7 +236,14 @@ export default function Clinet({
                 ) => {
                     if (!selected || socketRef.current !== socket) return;
                     setServerError(null);
-                    setRoom(newRoom);
+                    const normalizedItems =
+                        newRoom.items ??
+                        legacyWireWordsToItems(newRoom.words);
+                    const normalizedRoom: Room = {
+                        ...newRoom,
+                        items: normalizedItems,
+                    };
+                    setRoom(normalizedRoom);
                     setUsers(
                         newRoom.users.map((item) => {
                             return {
@@ -245,8 +254,10 @@ export default function Clinet({
                     );
                     setIsStarted(newRoom.isStart);
                     setCurrentTurn(newRoom.bombHolder);
-                    if (newRoom.wordIndex !== undefined && newRoom.items) {
-                        setCurrentItem(newRoom.items[newRoom.wordIndex] ?? null);
+                    if (newRoom.wordIndex !== undefined) {
+                        setCurrentItem(
+                            normalizedItems[newRoom.wordIndex] ?? null,
+                        );
                     } else {
                         setCurrentItem(null);
                     }
