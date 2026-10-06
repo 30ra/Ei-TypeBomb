@@ -1,4 +1,8 @@
-import { correctPrefixLength, getInitialCueLength, hintCoversError } from "@/lib/playground/recall-input";
+import {
+    correctPrefixLength,
+    getInitialCueLength,
+    hintCoversError,
+} from "@/lib/playground/recall-input";
 import { useEffect, useRef, useState } from "react";
 import { io } from "@/lib/room/socket";
 import { getAuthToken } from "@/lib/room/auth";
@@ -22,7 +26,7 @@ const isSoundEffectsEnabled = () => {
         );
 };
 
-export default function TypingView({
+function TypingAttempt({
     japanese,
     english,
     onSuccess,
@@ -74,29 +78,12 @@ export default function TypingView({
     const [isFailAnimating, setIsFailAnimating] = useState(false);
     const [syncedInput, setSyncedInput] = useState("");
     const wordKey = JSON.stringify([japanese, english]);
-    const [previousWordKey, setPreviousWordKey] = useState(wordKey);
-    const recallStartedAtRef = useRef(performance.now());
+    const recallStartedAtRef = useRef(0);
     const firstKeyAtRef = useRef<number | null>(null);
     const attemptCountRef = useRef(1);
     const maxCorrectPrefixRef = useRef(0);
-    const lastCorrectProgressAtRef = useRef(performance.now());
+    const lastCorrectProgressAtRef = useRef(0);
     const cueStepsKey = cueSteps.join(",");
-
-    if (previousWordKey !== wordKey) {
-        setPreviousWordKey(wordKey);
-        setTimedHintCount(0);
-        setRevealedHintLength(initialCueLength);
-        setInput(english ? Array(english.length).fill("") : []);
-        setCurrentSelection(0);
-        setCharInput("");
-        setSyncedInput("");
-        setIsFailAnimating(false);
-        recallStartedAtRef.current = performance.now();
-        firstKeyAtRef.current = null;
-        attemptCountRef.current = 1;
-        maxCorrectPrefixRef.current = 0;
-        lastCorrectProgressAtRef.current = performance.now();
-    }
 
     const isReadonly = currentInput !== null;
 
@@ -115,14 +102,7 @@ export default function TypingView({
     }, [english, isReadonly, wordKey]);
 
     useEffect(() => {
-        if (isReadonly || !english) {
-            setTimedHintCount(0);
-            setRevealedHintLength(initialCueLength);
-            return;
-        }
-
-        setTimedHintCount(0);
-        setRevealedHintLength(initialCueLength);
+        if (isReadonly || !english) return;
         revealedHintLengthRef.current = initialCueLength;
         lastCorrectProgressAtRef.current = performance.now();
 
@@ -134,35 +114,62 @@ export default function TypingView({
         const schedule = () => {
             if (cancelled) return;
 
-            timer = setTimeout(() => {
-                const now = performance.now();
-                const elapsedSinceProgress =
-                    now - lastCorrectProgressAtRef.current;
+            timer = setTimeout(
+                () => {
+                    const now = performance.now();
+                    const elapsedSinceProgress =
+                        now - lastCorrectProgressAtRef.current;
 
-                if (elapsedSinceProgress >= stallMs) {
-                    const currentLength = revealedHintLengthRef.current;
-                    const prefixLength = correctPrefixLength(inputStateRef.current, english);
-                    const nextRatio = cueSteps.find((ratio) => ratio > Math.max(currentLength, prefixLength) / english.length) ?? 1;
-                    const nextLength = Math.min(english.length, Math.max(currentLength, Math.ceil(english.length * nextRatio), prefixLength));
-                    if (nextLength > currentLength) {
-                        revealedHintLengthRef.current = nextLength;
-                        setRevealedHintLength(nextLength);
-                        setTimedHintCount((count) => count + 1);
-                        if (hintCoversError(inputStateRef.current, english, nextLength)) {
-                            attemptCountRef.current += 1;
-                            inputStateRef.current = Array(english.length).fill("");
-                            setInput(inputStateRef.current);
-                            setCurrentSelection(0);
-                            setCharInput("");
-                            setIsFailAnimating(true);
-                            onChangeInputRef.current("");
+                    if (elapsedSinceProgress >= stallMs) {
+                        const currentLength = revealedHintLengthRef.current;
+                        const prefixLength = correctPrefixLength(
+                            inputStateRef.current,
+                            english,
+                        );
+                        const nextRatio =
+                            cueSteps.find(
+                                (ratio) =>
+                                    ratio >
+                                    Math.max(currentLength, prefixLength) /
+                                        english.length,
+                            ) ?? 1;
+                        const nextLength = Math.min(
+                            english.length,
+                            Math.max(
+                                currentLength,
+                                Math.ceil(english.length * nextRatio),
+                                prefixLength,
+                            ),
+                        );
+                        if (nextLength > currentLength) {
+                            revealedHintLengthRef.current = nextLength;
+                            setRevealedHintLength(nextLength);
+                            setTimedHintCount((count) => count + 1);
+                            if (
+                                hintCoversError(
+                                    inputStateRef.current,
+                                    english,
+                                    nextLength,
+                                )
+                            ) {
+                                attemptCountRef.current += 1;
+                                inputStateRef.current = Array(
+                                    english.length,
+                                ).fill("");
+                                setInput(inputStateRef.current);
+                                setCurrentSelection(0);
+                                setCharInput("");
+                                setIsFailAnimating(true);
+                                onChangeInputRef.current("");
+                            }
                         }
+                        lastCorrectProgressAtRef.current = now;
                     }
-                    lastCorrectProgressAtRef.current = now;
-                }
 
-                schedule();
-            }, Math.max(250, stallMs));
+                    schedule();
+                },
+                Math.max(250, stallMs),
+            );
         };
 
         schedule();
@@ -246,7 +253,6 @@ export default function TypingView({
     const hintCount = baseHintCount + timedHintCount;
     const hintLength = revealedHintLength;
 
-
     useEffect(() => {
         if (isReadonly || !english) return;
 
@@ -260,39 +266,23 @@ export default function TypingView({
                     ? null
                     : Math.max(
                           0,
-                          firstKeyAtRef.current -
-                              recallStartedAtRef.current,
+                          firstKeyAtRef.current - recallStartedAtRef.current,
                       ),
             elapsedMs: Math.max(
                 0,
                 performance.now() - recallStartedAtRef.current,
             ),
         });
-    }, [
-        english,
-        hintCount,
-        hintLength,
-        input,
-        isReadonly,
-        onRecallProgress,
-    ]);
+    }, [english, hintCount, hintLength, input, isReadonly, onRecallProgress]);
 
     if (!english) return null;
 
     const moveToNext = (next: string[]) => {
         const nextIndex = currentSelection + 1;
-        const nextCorrectPrefixLength = correctPrefixLength(
-            next,
-            english,
-        );
-        if (
-            nextCorrectPrefixLength >
-            maxCorrectPrefixRef.current
-        ) {
-            maxCorrectPrefixRef.current =
-                nextCorrectPrefixLength;
-            lastCorrectProgressAtRef.current =
-                performance.now();
+        const nextCorrectPrefixLength = correctPrefixLength(next, english);
+        if (nextCorrectPrefixLength > maxCorrectPrefixRef.current) {
+            maxCorrectPrefixRef.current = nextCorrectPrefixLength;
+            lastCorrectProgressAtRef.current = performance.now();
         }
         const typedInsideHint =
             currentSelection < hintLength &&
@@ -309,8 +299,7 @@ export default function TypingView({
         } else {
             const result = next.join("");
             if (result === english) {
-                const finalCueRatio =
-                    hintLength / Math.max(1, english.length);
+                const finalCueRatio = hintLength / Math.max(1, english.length);
                 const outcome =
                     learningMode === "encoding"
                         ? "encoding"
@@ -327,13 +316,11 @@ export default function TypingView({
                     initialCueRatio,
                     additionalHintCount: timedHintCount,
                     firstAttemptCorrect:
-                        attemptCountRef.current === 1 &&
-                        hintCount === 0,
+                        attemptCountRef.current === 1 && hintCount === 0,
                     attemptCount: attemptCountRef.current,
                     hintCount,
                     revealedHintChars: hintLength,
-                    maxCorrectPrefixLength:
-                        maxCorrectPrefixRef.current,
+                    maxCorrectPrefixLength: maxCorrectPrefixRef.current,
                     recallLatencyMs:
                         firstKeyAtRef.current === null
                             ? null
@@ -344,8 +331,7 @@ export default function TypingView({
                               ),
                     elapsedMs: Math.max(
                         0,
-                        performance.now() -
-                            recallStartedAtRef.current,
+                        performance.now() - recallStartedAtRef.current,
                     ),
                 };
                 onRecallComplete?.(observation);
@@ -456,8 +442,7 @@ export default function TypingView({
                                 if (!value) return;
                                 const char = value.slice(-1);
                                 if (firstKeyAtRef.current === null) {
-                                    firstKeyAtRef.current =
-                                        performance.now();
+                                    firstKeyAtRef.current = performance.now();
                                 }
                                 const targetChar = english[currentSelection];
                                 if (targetChar === " ") {
@@ -532,5 +517,22 @@ export default function TypingView({
                 </div>
             </div>
         </div>
+    );
+}
+
+// Each answer/role/cue change starts a fresh attempt, including consecutive identical items.
+export default function TypingView(props: Parameters<typeof TypingAttempt>[0]) {
+    return (
+        <TypingAttempt
+            key={JSON.stringify([
+                props.japanese,
+                props.english,
+                props.currentInput === null,
+                props.learningMode,
+                props.initialCueRatio,
+                props.hasDuplicateMeaning,
+            ])}
+            {...props}
+        />
     );
 }

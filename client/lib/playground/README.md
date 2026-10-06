@@ -1,0 +1,18 @@
+# Playground learning model (v2)
+
+`memory.ts` owns learning transitions and scheduling. `recall-input.ts` owns cue rounding and input checks. Run regression checks with `npm --prefix client run test:playground` from the repository root.
+
+- Encoding shows the answer and pauses the bomb. Supported recall reduces the **requested cue stage** after two successes without additional hints. Two separated successes with no answer-character cues graduate an item. The Japanese prompt remains visible: `free_recall` is an application label, not the research definition of free recall.
+- At most four unfinished items are admitted to the session. When nothing is due, play continues with an admitted or graduated item. A success immediately after an answer exposure is `early_extra`: it records the attempt but does not advance the phase, stability, difficulty, or last evaluated review time. Failures still cause relearning.
+- Separation means four intervening presentation turns, or at least 30 seconds since the previous answer exposure. BOT answers count as exposures. BOTs prefer graduated items; otherwise they repeat the most recent answered item to avoid revealing the next target.
+- Phase, cue stage, and success counters persist in `learning_state`; exposures persist in `last_presented_at`. Session turn indices do not persist. Legacy rows without learning state restart at supported recall instead of assuming that five observations imply graduation.
+- Saves are serialized and retried. An authenticated-user/room-scoped local queue preserves unsent updates across reloads. Local storage and network failures can still prevent persistence; the UI reports failed network saves.
+- Bomb progress survives turn changes and changes of difficulty. Encoding, full-answer support, and hidden tabs pause it. This game clock is separate from evidence of successful recall.
+
+## Scientific limits
+
+The model uses `R = exp(-elapsedDays / S)`, so `S` is the number of days until predicted retrievability reaches approximately 36.8%. It is not an empirically fitted value or an FSRS stability parameter. Initial stability, gain/penalty coefficients, cue timing, two-success graduation, four-item admission, and the 30-second fallback are product hypotheses. Difficulty adjusts the time window, but the resulting duration is not a measured optimal retrieval time.
+
+Retrieval practice and spacing have experimental support: [Karpicke & Roediger (2008)](https://learninglab.psych.purdue.edu/downloads/2008/2008_Karpicke_Roediger_Science.pdf), [Cepeda et al. (2008)](https://www.yorku.ca/ncepeda/publications/CVRWP2008.pdf), and [Finn & Metcalfe (2010)](https://www.columbia.edu/cu/psychology/metcalfe/PDFs/FinnMetcalfe2010.pdf). These studies do not validate this application's coefficients. Four-item admission is not implied by a four-chunk working-memory capacity.
+
+`playground_item_recalled` records the model version, cue use, review context, exposure interval, outcome, and response timing for future evaluation. `recall_latency_ms` measures time until the first key press; `elapsed_ms` includes typing and correction. Neither alone measures retrieval completion. Validate improvements with unaided answer recall after a delay (for example, 24 hours and seven days), matched learning time, and prediction calibration. Passing the software tests establishes implementation behavior, not improved human retention.

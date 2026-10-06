@@ -4,4 +4,7 @@ export const advanceBombClock = (
     elapsedMs: number,
     durationMs: number,
     paused: boolean,
-) => paused ? progress : progress + Math.max(0, elapsedMs) / Math.max(1, durationMs);
+) =>
+    paused
+        ? progress
+        : progress + Math.max(0, elapsedMs) / Math.max(1, durationMs);

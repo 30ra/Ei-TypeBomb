@@ -49,9 +49,7 @@ export const loadPlaygroundMemory = async (roomId: string) => {
     };
 };
 
-export const syncPlaygroundMemory = async (
-    memory: ItemMemoryState[],
-) => {
+export const syncPlaygroundMemory = async (memory: ItemMemoryState[]) => {
     if (memory.length === 0) return null;
 
     const supabase = createClient();

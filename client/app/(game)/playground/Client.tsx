@@ -1,13 +1,7 @@
 "use client";
 import { getSignInUrl } from "@/lib/auth/sign-in-url";
 
-import {
-    useCallback,
-    useEffect,
-    useMemo,
-    useRef,
-    useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Item, Position, Room, User } from "@/type";
 import { useBombExplosion } from "@/components/feature/BombExplosion";
@@ -24,8 +18,9 @@ import {
     restoreSessionLearning,
     persistSessionLearning,
     updateSessionLearning as advanceSessionLearning,
-    MIN_INTERVENING_TURNS,
+    getReviewContext,
     MEMORY_MODEL_VERSION,
+    MAX_ACTIVE_LEARNING_ITEMS,
     type ItemMemoryState,
     type RecallObservation,
     type RecallProgress,
@@ -43,9 +38,7 @@ type Props = {
 };
 
 const LOCAL_USER_ID = "playground-player";
-const BOT_USERS: User[] = [
-    { id: "playground-bot-1", displayName: "練習相手" },
-];
+const BOT_USERS: User[] = [{ id: "playground-bot-1", displayName: "練習相手" }];
 
 const DEFAULT_TYPING_DELAY_MS = 220;
 const MIN_TYPING_DELAY_MS = 80;
@@ -53,10 +46,7 @@ const MAX_TYPING_DELAY_MS = 600;
 const TYPING_SPEED_SMOOTHING = 0.3;
 
 const clampTypingDelay = (delayMs: number) =>
-    Math.min(
-        MAX_TYPING_DELAY_MS,
-        Math.max(MIN_TYPING_DELAY_MS, delayMs),
-    );
+    Math.min(MAX_TYPING_DELAY_MS, Math.max(MIN_TYPING_DELAY_MS, delayMs));
 
 export default function Client({
     room: sourceRoom,
@@ -69,10 +59,7 @@ export default function Client({
 
     const [displayName, setDisplayName] = useState("あなた");
     const users = useMemo<User[]>(
-        () => [
-            { id: LOCAL_USER_ID, displayName },
-            ...BOT_USERS,
-        ],
+        () => [{ id: LOCAL_USER_ID, displayName }, ...BOT_USERS],
         [displayName],
     );
     const room = useMemo<Room>(
@@ -87,21 +74,18 @@ export default function Client({
     const [memoryByItem, setMemoryByItem] = useState<
         Record<string, ItemMemoryState>
     >({});
-    const memoryByItemRef = useRef<Record<string, ItemMemoryState>>(
-        {},
-    );
-    const pendingMemoryRef = useRef(
-        new Map<string, ItemMemoryState>(),
-    );
+    const memoryByItemRef = useRef<Record<string, ItemMemoryState>>({});
+    const pendingMemoryRef = useRef(new Map<string, ItemMemoryState>());
     const syncInFlightRef = useRef<Promise<void> | null>(null);
-    const currentReviewContextRef = useRef<"scheduled" | "early_extra">("scheduled");
+    const currentReviewContextRef = useRef<"scheduled" | "early_extra">(
+        "scheduled",
+    );
     const lastPresentedTurnRef = useRef<Record<string, number>>({});
+    const previousPresentationTurnRef = useRef<number | undefined>(undefined);
     const [saveError, setSaveError] = useState(false);
     const authenticatedUserIdRef = useRef<string | null>(null);
     const [memoryReady, setMemoryReady] = useState(false);
-    const [memoryError, setMemoryError] = useState<string | null>(
-        null,
-    );
+    const [memoryError, setMemoryError] = useState<string | null>(null);
 
     const [currentItem, setCurrentItem] = useState<Item | null>(null);
     const currentItemRef = useRef<Item | null>(null);
@@ -109,32 +93,31 @@ export default function Client({
     const currentTurnRef = useRef(0);
     const [bombStatus, setBombStatus] = useState(0);
     const bombStageProgressRef = useRef(0);
-    const bombPlanRef = useRef<{ duration: number; paused: boolean }>({ duration: 18_000, paused: true });
+    const bombPlanRef = useRef<{ duration: number; paused: boolean }>({
+        duration: 18_000,
+        paused: true,
+    });
     const [isStarted, setIsStarted] = useState(false);
     const [result, setResult] = useState<boolean | null>(null);
     const [currentInput, setCurrentInput] = useState("");
-    const [lostDisplayName, setLostDisplayName] = useState<
-        string | null
-    >(null);
+    const [lostDisplayName, setLostDisplayName] = useState<string | null>(null);
     const [stopRecommended, setStopRecommended] = useState(false);
-    const [recallPressurePaused, setRecallPressurePaused] =
-        useState(false);
+    const [recallPressurePaused, setRecallPressurePaused] = useState(false);
 
     const recentItemIdsRef = useRef<string[]>([]);
-    const sessionByItemRef = useRef<Record<string, SessionLearningState>>(
-        {},
-    );
+    const sessionByItemRef = useRef<Record<string, SessionLearningState>>({});
     const [sessionByItem, setSessionByItem] = useState<
         Record<string, SessionLearningState>
     >({});
     const sessionTurnNumberRef = useRef(0);
+    const [itemPresentationKey, setItemPresentationKey] = useState(0);
     const recallProgressRef = useRef<RecallProgress | null>(null);
     const userReviewCountRef = useRef(0);
-    const sessionStartedAtRef = useRef(Date.now());
+    const sessionStartedAtRef = useRef(0);
     const initialGameStartedRef = useRef(false);
-    const countdownTimerRef = useRef<ReturnType<
-        typeof setTimeout
-    > | null>(null);
+    const countdownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+        null,
+    );
     const usersRef = useRef(users);
     const userTypingDelayRef = useRef(DEFAULT_TYPING_DELAY_MS);
     const previousInputAtRef = useRef<number | null>(null);
@@ -159,9 +142,14 @@ export default function Client({
     );
 
     useEffect(() => {
-        setDisplayName(
-            localStorage.getItem("display-name") || "あなた",
+        const timer = setTimeout(
+            () =>
+                setDisplayName(
+                    localStorage.getItem("display-name") || "あなた",
+                ),
+            0,
         );
+        return () => clearTimeout(timer);
     }, []);
 
     useEffect(() => {
@@ -176,17 +164,12 @@ export default function Client({
             if (cancelled) return;
 
             if (!loaded.userId) {
-                router.replace(
-                    getSignInUrl(),
-                );
+                router.replace(getSignInUrl());
                 return;
             }
 
             if (loaded.error) {
-                console.error(
-                    "Failed to load playground memory",
-                    loaded.error,
-                );
+                console.error("Failed to load playground memory", loaded.error);
                 posthog.capture("playground_memory_load_failed", {
                     room_id: room.id,
                 });
@@ -199,11 +182,26 @@ export default function Client({
             authenticatedUserIdRef.current = loaded.userId;
             // Recover unsent observations after reload, scoped to the authenticated user.
             try {
-                const queued: ItemMemoryState[] = JSON.parse(localStorage.getItem(`playground-pending:${loaded.userId}:${room.id}`) ?? "[]");
+                const queued: ItemMemoryState[] = JSON.parse(
+                    localStorage.getItem(
+                        `playground-pending:${loaded.userId}:${room.id}`,
+                    ) ?? "[]",
+                );
                 for (const pending of queued) {
-                    if (pending.userId !== loaded.userId || pending.roomId !== room.id || !items.some((item) => item.id === pending.itemId) || !Number.isFinite(pending.stability) || !Number.isFinite(pending.difficulty)) continue;
+                    if (
+                        pending.userId !== loaded.userId ||
+                        pending.roomId !== room.id ||
+                        !items.some((item) => item.id === pending.itemId) ||
+                        !Number.isFinite(pending.stability) ||
+                        !Number.isFinite(pending.difficulty)
+                    )
+                        continue;
                     const remote = loaded.memoryByItem[pending.itemId];
-                    if (!remote || Date.parse(pending.updatedAt ?? "") > Date.parse(remote.updatedAt ?? "")) {
+                    if (
+                        !remote ||
+                        Date.parse(pending.updatedAt ?? "") >=
+                            Date.parse(remote.updatedAt ?? "")
+                    ) {
                         loaded.memoryByItem[pending.itemId] = pending;
                         pendingMemoryRef.current.set(pending.itemId, pending);
                     }
@@ -231,40 +229,46 @@ export default function Client({
 
         if (item) {
             sessionTurnNumberRef.current += 1;
+            setItemPresentationKey(sessionTurnNumberRef.current);
             recentItemIdsRef.current = [
                 ...recentItemIdsRef.current,
                 item.id,
             ].slice(-12);
 
             const isLocalTurn =
-                usersRef.current[currentTurnRef.current]?.id ===
-                LOCAL_USER_ID;
+                usersRef.current[currentTurnRef.current]?.id === LOCAL_USER_ID;
             const memory = memoryByItemRef.current[item.id];
 
             const previousExposure = lastPresentedTurnRef.current[item.id];
             const currentSession = sessionByItemRef.current[item.id];
             const phase = currentSession?.phase ?? memory?.learningState?.phase;
-            const tooSoon = previousExposure !== undefined
-                ? sessionTurnNumberRef.current - previousExposure <= MIN_INTERVENING_TURNS
-                : memory?.lastPresentedAt
-                  ? Date.now() - Date.parse(memory.lastPresentedAt) < 30_000
-                  : false;
-            currentReviewContextRef.current =
-                tooSoon || (phase === "graduated" && createTurnPlan(memory).retrievability >= 0.8)
-                    ? "early_extra" : "scheduled";
-            lastPresentedTurnRef.current[item.id] = sessionTurnNumberRef.current;
+            previousPresentationTurnRef.current = previousExposure;
+            currentReviewContextRef.current = getReviewContext(
+                memory,
+                phase,
+                previousExposure,
+                sessionTurnNumberRef.current,
+            );
+            lastPresentedTurnRef.current[item.id] =
+                sessionTurnNumberRef.current;
 
             if (isLocalTurn && !currentSession) {
                 sessionByItemRef.current = {
                     ...sessionByItemRef.current,
-                    [item.id]: restoreSessionLearning(memory, sessionTurnNumberRef.current),
+                    [item.id]: restoreSessionLearning(
+                        memory,
+                        sessionTurnNumberRef.current,
+                    ),
                 };
                 setSessionByItem(sessionByItemRef.current);
             } else if (!isLocalTurn && currentSession) {
                 // Seeing a BOT type the answer is exposure, even though it is not a user review.
                 sessionByItemRef.current = {
                     ...sessionByItemRef.current,
-                    [item.id]: { ...currentSession, lastSeenTurn: sessionTurnNumberRef.current },
+                    [item.id]: {
+                        ...currentSession,
+                        lastSeenTurn: sessionTurnNumberRef.current,
+                    },
                 };
                 setSessionByItem(sessionByItemRef.current);
             }
@@ -277,8 +281,7 @@ export default function Client({
                 items,
                 memoryByItem: memoryByItemRef.current,
                 recentItemIds: recentItemIdsRef.current,
-                activeRecall:
-                    usersRef.current[turnIndex]?.id === LOCAL_USER_ID,
+                activeRecall: usersRef.current[turnIndex]?.id === LOCAL_USER_ID,
                 sessionByItem: sessionByItemRef.current,
                 currentTurnNumber: sessionTurnNumberRef.current,
             }),
@@ -287,9 +290,7 @@ export default function Client({
 
     const resolveTurnWithItem = useCallback(
         (requestedTurnIndex: number) => {
-            const requestedItem = chooseItemForTurn(
-                requestedTurnIndex,
-            );
+            const requestedItem = chooseItemForTurn(requestedTurnIndex);
             if (requestedItem) {
                 return {
                     turnIndex: requestedTurnIndex,
@@ -327,6 +328,8 @@ export default function Client({
             clearTimeout(countdownTimerRef.current);
         }
 
+        if (sessionStartedAtRef.current === 0)
+            sessionStartedAtRef.current = Date.now();
         resetExplosion();
         setIsStarted(true);
         setBombStatus(0);
@@ -342,9 +345,7 @@ export default function Client({
         );
 
         countdownTimerRef.current = setTimeout(() => {
-            const resolved = resolveTurnWithItem(
-                requestedFirstTurn,
-            );
+            const resolved = resolveTurnWithItem(requestedFirstTurn);
             setTrackedTurn(resolved.turnIndex);
             setTrackedItem(resolved.item);
             countdownTimerRef.current = null;
@@ -370,10 +371,7 @@ export default function Client({
     }, []);
 
     useEffect(() => {
-        if (
-            !memoryReady ||
-            initialGameStartedRef.current
-        ) {
+        if (!memoryReady || initialGameStartedRef.current) {
             return;
         }
 
@@ -383,33 +381,54 @@ export default function Client({
             player_count: users.length,
         });
         startGame();
-    }, [
-        memoryReady,
-        room.id,
-        startGame,
-        users.length,
-    ]);
+    }, [memoryReady, room.id, startGame, users.length]);
 
     const updateLocalMemory = useCallback(
-        (
-            item: Item,
-            observation: RecallObservation,
-        ) => {
+        (item: Item, observation: RecallObservation) => {
             const userId = authenticatedUserIdRef.current;
             if (!userId) return;
 
-            const currentSession = sessionByItemRef.current[item.id] ?? restoreSessionLearning(memoryByItemRef.current[item.id], sessionTurnNumberRef.current);
-            const nextSession = advanceSessionLearning(currentSession, observation, sessionTurnNumberRef.current);
-            sessionByItemRef.current = { ...sessionByItemRef.current, [item.id]: nextSession };
+            const currentSession =
+                sessionByItemRef.current[item.id] ??
+                restoreSessionLearning(
+                    memoryByItemRef.current[item.id],
+                    sessionTurnNumberRef.current,
+                );
+            const nextSession = advanceSessionLearning(
+                currentSession,
+                observation,
+                sessionTurnNumberRef.current,
+            );
+            const sessions = { ...sessionByItemRef.current };
+            if (
+                nextSession.phase !== "graduated" &&
+                currentSession.phase === "graduated"
+            ) {
+                const active = Object.entries(sessions).filter(
+                    ([id, state]) =>
+                        id !== item.id && state.phase !== "graduated",
+                );
+                if (active.length >= MAX_ACTIVE_LEARNING_ITEMS) {
+                    active.sort(
+                        (a, b) => a[1].lastSeenTurn - b[1].lastSeenTurn,
+                    );
+                    // Its persisted state remains available when it is admitted again.
+                    delete sessions[active[0][0]];
+                }
+            }
+            sessionByItemRef.current = { ...sessions, [item.id]: nextSession };
             setSessionByItem(sessionByItemRef.current);
 
-            const nextMemory = { ...applyRecallObservation({
-                memory: memoryByItemRef.current[item.id],
-                observation,
-                userId,
-                roomId: room.id,
-                itemId: item.id,
-            }), learningState: persistSessionLearning(nextSession) };
+            const nextMemory = {
+                ...applyRecallObservation({
+                    memory: memoryByItemRef.current[item.id],
+                    observation,
+                    userId,
+                    roomId: room.id,
+                    itemId: item.id,
+                }),
+                learningState: persistSessionLearning(nextSession),
+            };
 
             const nextMemoryByItem = {
                 ...memoryByItemRef.current,
@@ -428,20 +447,19 @@ export default function Client({
                 model_version: MEMORY_MODEL_VERSION,
                 review_context: observation.reviewContext,
                 elapsed_ms: observation.elapsedMs,
+                elapsed_since_presentation_ms:
+                    observation.elapsedSincePresentationMs,
                 initial_cue_ratio: observation.initialCueRatio,
                 additional_hint_count: observation.additionalHintCount,
                 recall_latency_ms: observation.recallLatencyMs,
                 hint_count: observation.hintCount,
-                revealed_hint_chars:
-                    observation.revealedHintChars,
-                max_correct_prefix_length:
-                    observation.maxCorrectPrefixLength,
+                revealed_hint_chars: observation.revealedHintChars,
+                max_correct_prefix_length: observation.maxCorrectPrefixLength,
                 attempt_count: observation.attemptCount,
                 recall_outcome: observation.outcome,
                 final_cue_ratio: observation.finalCueRatio,
                 session_phase_after:
-                    sessionByItemRef.current[item.id]?.phase ??
-                    "long_term",
+                    sessionByItemRef.current[item.id]?.phase ?? "long_term",
                 stability_after: nextMemory.stability,
                 difficulty_after: nextMemory.difficulty,
             });
@@ -453,7 +471,10 @@ export default function Client({
         const userId = authenticatedUserIdRef.current;
         if (!userId) return;
         try {
-            localStorage.setItem(`playground-pending:${userId}:${room.id}`, JSON.stringify([...pendingMemoryRef.current.values()]));
+            localStorage.setItem(
+                `playground-pending:${userId}:${room.id}`,
+                JSON.stringify([...pendingMemoryRef.current.values()]),
+            );
         } catch {
             // Network sync still works when local storage is unavailable.
         }
@@ -470,34 +491,53 @@ export default function Client({
                     const error = await syncPlaygroundMemory(snapshot);
                     if (error) throw error;
                     for (const synced of snapshot) {
-                        if (pendingMemoryRef.current.get(synced.itemId) === synced) pendingMemoryRef.current.delete(synced.itemId);
+                        if (
+                            pendingMemoryRef.current.get(synced.itemId) ===
+                            synced
+                        )
+                            pendingMemoryRef.current.delete(synced.itemId);
                     }
                     cachePendingMemory();
                     setSaveError(false);
                 } catch (error) {
                     console.error("Failed to sync playground memory", error);
                     setSaveError(true);
-                    posthog.capture("playground_memory_sync_failed", { room_id: room.id });
+                    posthog.capture("playground_memory_sync_failed", {
+                        room_id: room.id,
+                    });
                     break;
                 }
             }
         };
         const promise = sync();
         syncInFlightRef.current = promise;
-        try { await promise; } finally { syncInFlightRef.current = null; }
+        try {
+            await promise;
+        } finally {
+            syncInFlightRef.current = null;
+        }
     }, [room.id, cachePendingMemory]);
 
     useEffect(() => {
         if (!memoryReady) return;
         cachePendingMemory();
-        const timer = setTimeout(() => { void flushPendingMemory(); }, 300);
+        const timer = setTimeout(() => {
+            void flushPendingMemory();
+        }, 300);
         return () => clearTimeout(timer);
     }, [memoryByItem, memoryReady, cachePendingMemory, flushPendingMemory]);
 
     useEffect(() => {
-        const retry = () => { void flushPendingMemory(); };
-        const leaving = () => { cachePendingMemory(); void flushPendingMemory(); };
-        const hidden = () => { if (document.visibilityState === "hidden") leaving(); };
+        const retry = () => {
+            void flushPendingMemory();
+        };
+        const leaving = () => {
+            cachePendingMemory();
+            void flushPendingMemory();
+        };
+        const hidden = () => {
+            if (document.visibilityState === "hidden") leaving();
+        };
         const interval = setInterval(retry, 5_000);
         window.addEventListener("online", retry);
         window.addEventListener("pagehide", leaving);
@@ -511,26 +551,20 @@ export default function Client({
         };
     }, [cachePendingMemory, flushPendingMemory]);
 
-    const handleRecallProgress = useCallback(
-        (progress: RecallProgress) => {
-            if (
-                usersRef.current[currentTurnRef.current]?.id !==
-                LOCAL_USER_ID
-            ) {
-                return;
-            }
+    const handleRecallProgress = useCallback((progress: RecallProgress) => {
+        if (usersRef.current[currentTurnRef.current]?.id !== LOCAL_USER_ID) {
+            return;
+        }
 
-            recallProgressRef.current = progress;
-            const item = currentItemRef.current;
-            if (
-                item?.type === "typed_recall" &&
-                progress.revealedHintChars >= item.answer.length
-            ) {
-                setRecallPressurePaused(true);
-            }
-        },
-        [],
-    );
+        recallProgressRef.current = progress;
+        const item = currentItemRef.current;
+        if (
+            item?.type === "typed_recall" &&
+            progress.revealedHintChars >= item.answer.length
+        ) {
+            setRecallPressurePaused(true);
+        }
+    }, []);
 
     const handleRecallComplete = useCallback(
         (observation: RecallObservation) => {
@@ -543,7 +577,21 @@ export default function Client({
                 return;
             }
 
-            updateLocalMemory(item, { ...observation, reviewContext: currentReviewContextRef.current });
+            const context = getReviewContext(
+                memoryByItemRef.current[item.id],
+                sessionByItemRef.current[item.id]?.phase,
+                previousPresentationTurnRef.current,
+                sessionTurnNumberRef.current,
+            );
+            const lastExposure =
+                memoryByItemRef.current[item.id]?.lastPresentedAt;
+            updateLocalMemory(item, {
+                ...observation,
+                reviewContext: context,
+                elapsedSincePresentationMs: lastExposure
+                    ? Math.max(0, Date.now() - Date.parse(lastExposure))
+                    : undefined,
+            });
         },
         [updateLocalMemory],
     );
@@ -555,21 +603,18 @@ export default function Client({
         const addedCharacters = input.length - previousLength;
 
         if (addedCharacters > 0 && previousInputAt !== null) {
-            const sampleDelay =
-                (now - previousInputAt) / addedCharacters;
+            const sampleDelay = (now - previousInputAt) / addedCharacters;
 
             if (sampleDelay > 0 && sampleDelay < 2000) {
                 const clampedSample = clampTypingDelay(sampleDelay);
                 userTypingDelayRef.current =
-                    userTypingDelayRef.current *
-                        (1 - TYPING_SPEED_SMOOTHING) +
+                    userTypingDelayRef.current * (1 - TYPING_SPEED_SMOOTHING) +
                     clampedSample * TYPING_SPEED_SMOOTHING;
             }
         }
 
         previousInputLengthRef.current = input.length;
-        previousInputAtRef.current =
-            input.length === 0 ? null : now;
+        previousInputAtRef.current = input.length === 0 ? null : now;
         setCurrentInput(input);
     }, []);
 
@@ -581,12 +626,22 @@ export default function Client({
         }
 
         const presentedItem = currentItemRef.current;
-        if (presentedItem && usersRef.current[currentTurnRef.current]?.id !== LOCAL_USER_ID) {
+        if (
+            presentedItem &&
+            usersRef.current[currentTurnRef.current]?.id !== LOCAL_USER_ID
+        ) {
             const memory = memoryByItemRef.current[presentedItem.id];
             if (memory) {
                 const now = new Date().toISOString();
-                const exposed = { ...memory, lastPresentedAt: now, updatedAt: now };
-                memoryByItemRef.current = { ...memoryByItemRef.current, [presentedItem.id]: exposed };
+                const exposed = {
+                    ...memory,
+                    lastPresentedAt: now,
+                    updatedAt: now,
+                };
+                memoryByItemRef.current = {
+                    ...memoryByItemRef.current,
+                    [presentedItem.id]: exposed,
+                };
                 pendingMemoryRef.current.set(presentedItem.id, exposed);
                 setMemoryByItem(memoryByItemRef.current);
             }
@@ -596,11 +651,8 @@ export default function Client({
         previousInputLengthRef.current = 0;
 
         const requestedNextTurn =
-            (currentTurnRef.current + 1) %
-            usersRef.current.length;
-        const resolved = resolveTurnWithItem(
-            requestedNextTurn,
-        );
+            (currentTurnRef.current + 1) % usersRef.current.length;
+        const resolved = resolveTurnWithItem(requestedNextTurn);
         setTrackedTurn(resolved.turnIndex);
         setTrackedItem(resolved.item);
 
@@ -619,10 +671,7 @@ export default function Client({
     const currentTurnUser = users[currentTurn];
 
     const currentTurnPlan = useMemo(() => {
-        if (
-            currentTurnUser?.id !== LOCAL_USER_ID ||
-            !currentItem
-        ) {
+        if (currentTurnUser?.id !== LOCAL_USER_ID || !currentItem) {
             return null;
         }
 
@@ -630,24 +679,27 @@ export default function Client({
             memoryByItem[currentItem.id],
             sessionByItem[currentItem.id],
         );
-    }, [
-        currentItem,
-        currentTurnUser?.id,
-        memoryByItem,
-        sessionByItem,
-    ]);
+    }, [currentItem, currentTurnUser?.id, memoryByItem, sessionByItem]);
 
     useEffect(() => {
         bombPlanRef.current = {
-            duration: (currentTurnPlan?.retrievalWindowMs ?? 18_000) *
+            duration:
+                (currentTurnPlan?.retrievalWindowMs ?? 18_000) *
                 (currentTurnPlan?.bombPressure === "low" ? 1.35 : 1),
-            paused: !currentItem || currentTurnPlan?.bombPressure === "paused" || recallPressurePaused,
+            paused:
+                !currentItem ||
+                currentTurnPlan?.bombPressure === "paused" ||
+                recallPressurePaused,
         };
     }, [currentItem, currentTurnPlan, recallPressurePaused]);
 
     useEffect(() => {
         if (!memoryReady || !isStarted || result !== null) return;
         let previousTick = performance.now();
+        const resetTick = () => {
+            previousTick = performance.now();
+        };
+        document.addEventListener("visibilitychange", resetTick);
         const jitter = 0.94 + Math.random() * 0.12;
         const timer = setInterval(() => {
             const now = performance.now();
@@ -655,31 +707,28 @@ export default function Client({
             previousTick = now;
             const duration = bombPlanRef.current.duration * jitter;
             bombStageProgressRef.current = advanceBombClock(
-                bombStageProgressRef.current, elapsed, duration,
-                bombPlanRef.current.paused || document.visibilityState === "hidden",
+                bombStageProgressRef.current,
+                elapsed,
+                duration,
+                bombPlanRef.current.paused ||
+                    document.visibilityState === "hidden",
             );
             if (bombStageProgressRef.current < 1) return;
             bombStageProgressRef.current = 0;
             if (bombStatus === 4) {
-                const lostUser =
-                    usersRef.current[currentTurnRef.current];
-                const didLose =
-                    lostUser?.id === LOCAL_USER_ID;
+                const lostUser = usersRef.current[currentTurnRef.current];
+                const didLose = lostUser?.id === LOCAL_USER_ID;
                 const item = currentItemRef.current;
 
-                if (
-                    didLose &&
-                    item?.type === "typed_recall"
-                ) {
-                    const progress =
-                        recallProgressRef.current ?? {
-                            attemptCount: 1,
-                            hintCount: 0,
-                            revealedHintChars: 0,
-                            maxCorrectPrefixLength: 0,
-                            recallLatencyMs: null,
-                            elapsedMs: duration,
-                        };
+                if (didLose && item?.type === "typed_recall") {
+                    const progress = recallProgressRef.current ?? {
+                        attemptCount: 1,
+                        hintCount: 0,
+                        revealedHintChars: 0,
+                        maxCorrectPrefixLength: 0,
+                        recallLatencyMs: null,
+                        elapsedMs: duration,
+                    };
 
                     updateLocalMemory(item, {
                         ...progress,
@@ -693,28 +742,21 @@ export default function Client({
                 const recommendStop = shouldRecommendStop({
                     items,
                     memoryByItem: memoryByItemRef.current,
-                    userReviewCount:
-                        userReviewCountRef.current,
-                    sessionStartedAt:
-                        sessionStartedAtRef.current,
+                    userReviewCount: userReviewCountRef.current,
+                    sessionStartedAt: sessionStartedAtRef.current,
                 });
 
                 setStopRecommended(recommendStop);
                 explode();
                 setResult(didLose);
-                setLostDisplayName(
-                    lostUser?.displayName ?? "練習相手",
-                );
+                setLostDisplayName(lostUser?.displayName ?? "練習相手");
                 setBombStatus(0);
 
-                posthog.capture(
-                    didLose ? "game_lost" : "game_won",
-                    {
-                        mode: "playground",
-                        room_id: room.id,
-                        stop_recommended: recommendStop,
-                    },
-                );
+                posthog.capture(didLose ? "game_lost" : "game_won", {
+                    mode: "playground",
+                    room_id: room.id,
+                    stop_recommended: recommendStop,
+                });
 
                 void flushPendingMemory();
                 return;
@@ -723,7 +765,10 @@ export default function Client({
             setBombStatus((previous) => previous + 1);
         }, 200);
 
-        return () => clearInterval(timer);
+        return () => {
+            clearInterval(timer);
+            document.removeEventListener("visibilitychange", resetTick);
+        };
     }, [
         bombStatus,
         explode,
@@ -747,13 +792,8 @@ export default function Client({
             return;
         }
 
-        const charDelay = clampTypingDelay(
-            userTypingDelayRef.current,
-        );
-        const initialDelay = Math.min(
-            1000,
-            Math.max(250, charDelay * 2.5),
-        );
+        const charDelay = clampTypingDelay(userTypingDelayRef.current);
+        const initialDelay = Math.min(1000, Math.max(250, charDelay * 2.5));
 
         const target = currentItem.answer;
         let charIndex = 0;
@@ -765,9 +805,7 @@ export default function Client({
 
             if (charIndex < target.length) {
                 charIndex += 1;
-                setCurrentInput(
-                    target.slice(0, charIndex),
-                );
+                setCurrentInput(target.slice(0, charIndex));
                 const jitter = 0.9 + Math.random() * 0.2;
                 timer = setTimeout(
                     typeNextCharacter,
@@ -781,30 +819,20 @@ export default function Client({
             }, 200);
         };
 
-        timer = setTimeout(
-            typeNextCharacter,
-            initialDelay,
-        );
+        timer = setTimeout(typeNextCharacter, initialDelay);
 
         return () => {
             cancelled = true;
             clearTimeout(timer);
         };
-    }, [
-        currentItem,
-        currentTurnUser,
-        handleSuccess,
-        isStarted,
-        result,
-    ]);
+    }, [currentItem, currentTurnUser, handleSuccess, isStarted, result]);
 
     useEffect(() => {
         audioRef.current = new Audio("/MT-RD_17_for_Loop.wav");
         audioRef.current.loop = true;
 
         const startAudio = () => {
-            if (!initialBackgroundMusic || !audioRef.current)
-                return;
+            if (!initialBackgroundMusic || !audioRef.current) return;
 
             audioRef.current
                 .play()
@@ -814,29 +842,14 @@ export default function Client({
 
         const addListeners = () => {
             window.addEventListener("click", startAudio);
-            window.addEventListener(
-                "touchstart",
-                startAudio,
-            );
-            window.addEventListener(
-                "keydown",
-                startAudio,
-            );
+            window.addEventListener("touchstart", startAudio);
+            window.addEventListener("keydown", startAudio);
         };
 
         const removeListeners = () => {
-            window.removeEventListener(
-                "click",
-                startAudio,
-            );
-            window.removeEventListener(
-                "touchstart",
-                startAudio,
-            );
-            window.removeEventListener(
-                "keydown",
-                startAudio,
-            );
+            window.removeEventListener("click", startAudio);
+            window.removeEventListener("touchstart", startAudio);
+            window.removeEventListener("keydown", startAudio);
         };
 
         startAudio();
@@ -849,9 +862,7 @@ export default function Client({
     }, [initialBackgroundMusic]);
 
     const activeLearningPlan =
-        currentTurnUser?.id === LOCAL_USER_ID
-            ? currentTurnPlan
-            : null;
+        currentTurnUser?.id === LOCAL_USER_ID ? currentTurnPlan : null;
 
     return (
         <GameView
@@ -862,7 +873,7 @@ export default function Client({
             currentTurn={currentTurn}
             bombStatus={bombStatus}
             currentItem={currentItem}
-            itemPresentationKey={sessionTurnNumberRef.current}
+            itemPresentationKey={itemPresentationKey}
             currentInput={currentInput}
             isStarted={isStarted}
             serverError={memoryError}
@@ -875,17 +886,11 @@ export default function Client({
             onRecallProgress={handleRecallProgress}
             onRecallComplete={handleRecallComplete}
             learningMode={activeLearningPlan?.mode}
-            initialCueRatio={
-                activeLearningPlan?.initialCueRatio
-            }
+            initialCueRatio={activeLearningPlan?.initialCueRatio}
             cueSteps={activeLearningPlan?.cueSteps}
             stallMs={activeLearningPlan?.stallMs}
             onPlayAgain={startGame}
-            onCreateRoom={() =>
-                router.push(
-                    getSignInUrl(),
-                )
-            }
+            onCreateRoom={() => router.push(getSignInUrl())}
             enableRemoteTypingSync={false}
             stopRecommended={stopRecommended}
             onStop={() => {
@@ -895,14 +900,22 @@ export default function Client({
             }}
             resultExtraActions={
                 <>
-                {saveError && <p role="status">学習データは保存待ちです。接続が戻ると再送します。</p>}
-                <Button
-                    iconName="link"
-                    className="w-full"
-                    onClick={() => { void flushPendingMemory().finally(() => router.push("/room")); }}
-                >
-                    別のルームを選択
-                </Button>
+                    {saveError && (
+                        <p role="status">
+                            学習データは保存待ちです。接続が戻ると再送します。
+                        </p>
+                    )}
+                    <Button
+                        iconName="link"
+                        className="w-full"
+                        onClick={() => {
+                            void flushPendingMemory().finally(() =>
+                                router.push("/room"),
+                            );
+                        }}
+                    >
+                        別のルームを選択
+                    </Button>
                 </>
             }
         />
