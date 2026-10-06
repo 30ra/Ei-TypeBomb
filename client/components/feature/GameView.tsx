@@ -36,6 +36,7 @@ type Props = {
     onWatch?: () => void;
     onStartGame?: () => void;
     onLeave?: () => void;
+    enableRemoteTypingSync?: boolean;
 };
 
 export default function GameView({
@@ -64,6 +65,7 @@ export default function GameView({
     onWatch,
     onStartGame,
     onLeave,
+    enableRemoteTypingSync = true,
 }: Readonly<Props>) {
     const currentTurnUser = users[currentTurn] as User | undefined;
     const isParticipant = users.some((user) => user.id === userId);
@@ -120,6 +122,7 @@ export default function GameView({
                               ? null
                               : currentInput
                     }
+                    enableRemoteTypingSync={enableRemoteTypingSync}
                 />
             </div>
         );
