@@ -48,6 +48,12 @@ const requireRoomItems = (room: Room) => {
     }
 };
 
+const itemsToLegacyWireWords = (room: Room) =>
+    room.items?.map((item) => ({
+        jp: item.prompt,
+        en: item.answer,
+    })) ?? [];
+
 let rooms: Room[] = [];
 const pendingRoomLoads = new Map<string, Promise<Room | null>>();
 
@@ -113,6 +119,7 @@ const sendRoomInfo = (roomId: string | null) => {
     if (!room) return;
     io.to(roomId).emit("room:broadcast", {
         ...room,
+        words: itemsToLegacyWireWords(room),
         password: undefined,
         bombTimer: undefined,
     });
