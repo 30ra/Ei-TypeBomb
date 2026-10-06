@@ -6,7 +6,9 @@ import UsersView from "@/components/feature/UsersView";
 import Button from "@/components/ui/Button";
 import type { Item, Position, Room, User } from "@/type";
 import { getRoomItems } from "@/lib/item";
-import GameNotice, { type GameNoticeProps } from "@/components/feature/GameNotice";
+import GameNotice, {
+    type GameNoticeProps,
+} from "@/components/feature/GameNotice";
 
 type Props = {
     room: Room | null;
