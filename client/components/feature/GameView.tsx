@@ -6,7 +6,7 @@ import UsersView from "@/components/feature/UsersView";
 import Button from "@/components/ui/Button";
 import type { Item, Position, Room, User } from "@/type";
 import { getRoomItems } from "@/lib/item";
-import { Icon } from "../ui/Icon";
+import GameNotice, { type GameNoticeProps } from "@/components/feature/GameNotice";
 
 type Props = {
     room: Room | null;
@@ -20,7 +20,7 @@ type Props = {
     isStarted: boolean;
     isSpectator?: boolean;
     serverError?: string | null;
-    connectionAlert?: boolean;
+    notice?: GameNoticeProps;
     result: boolean | null;
     lostDisplayName?: string | null;
     bombRef?: Ref<HTMLDivElement>;
@@ -48,7 +48,7 @@ export default function GameView({
     isStarted,
     isSpectator = false,
     serverError = null,
-    connectionAlert,
+    notice,
     result,
     lostDisplayName,
     bombRef,
@@ -125,20 +125,7 @@ export default function GameView({
     return (
         <div className="flex flex-col md:flex-row w-full h-full">
             {explosionLayer}
-            {connectionAlert !== undefined && (
-                <div
-                    className={`${!connectionAlert && "opacity-0 scale-95 blur-md"} transition-all duration-(--duration-etb) ease-etb fixed top-4 right-4 flex items-center gap-4 w-94 rounded-2xl bg-(--color-foreground) text-(--color-background) py-3 px-4`}
-                >
-                    <Icon name="globeOff" />
-                    <div
-                        className="flex flex-col"
-                        data-cursor={connectionAlert ? "text" : undefined}
-                    >
-                        <span className="font-bold">接続が切れました</span>
-                        プレイヤーがルームから退出しました。
-                    </div>
-                </div>
-            )}
+            {notice && <GameNotice {...notice} />}
 
             {result !== null && (
                 <div className="bomb-result-enter fixed flex items-center flex-col gap-4 justify-center bg-(--color-background)/75 z-1 top-0 left-0 w-screen h-screen">
