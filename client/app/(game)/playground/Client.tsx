@@ -38,14 +38,19 @@ type Props = {
 
 const LOCAL_USER_ID = "playground-player";
 const BOT_USERS: User[] = [
-    { id: "playground-bot-1", displayName: "練習相手1" },
-    { id: "playground-bot-2", displayName: "練習相手2" },
+    { id: "playground-bot-1", displayName: "練習相手" },
 ];
 
-const BOT_TYPING = {
-    "playground-bot-1": { initialDelay: 600, charDelay: 220 },
-    "playground-bot-2": { initialDelay: 800, charDelay: 300 },
-} as const;
+const DEFAULT_TYPING_DELAY_MS = 220;
+const MIN_TYPING_DELAY_MS = 80;
+const MAX_TYPING_DELAY_MS = 600;
+const TYPING_SPEED_SMOOTHING = 0.3;
+
+const clampTypingDelay = (delayMs: number) =>
+    Math.min(
+        MAX_TYPING_DELAY_MS,
+        Math.max(MIN_TYPING_DELAY_MS, delayMs),
+    );
 
 export default function Client({
     room: sourceRoom,
@@ -67,7 +72,7 @@ export default function Client({
     const room = useMemo<Room>(
         () => ({
             ...sourceRoom,
-            maxPlayers: 3,
+            maxPlayers: 2,
         }),
         [sourceRoom],
     );
@@ -110,6 +115,9 @@ export default function Client({
         typeof setTimeout
     > | null>(null);
     const usersRef = useRef(users);
+    const userTypingDelayRef = useRef(DEFAULT_TYPING_DELAY_MS);
+    const previousInputAtRef = useRef<number | null>(null);
+    const previousInputLengthRef = useRef(0);
 
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const successAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -385,6 +393,31 @@ export default function Client({
         [updateLocalMemory],
     );
 
+    const handleInputChange = useCallback((input: string) => {
+        const now = Date.now();
+        const previousLength = previousInputLengthRef.current;
+        const previousInputAt = previousInputAtRef.current;
+        const addedCharacters = input.length - previousLength;
+
+        if (addedCharacters > 0 && previousInputAt !== null) {
+            const sampleDelay =
+                (now - previousInputAt) / addedCharacters;
+
+            if (sampleDelay > 0 && sampleDelay < 2000) {
+                const clampedSample = clampTypingDelay(sampleDelay);
+                userTypingDelayRef.current =
+                    userTypingDelayRef.current *
+                        (1 - TYPING_SPEED_SMOOTHING) +
+                    clampedSample * TYPING_SPEED_SMOOTHING;
+            }
+        }
+
+        previousInputLengthRef.current = input.length;
+        previousInputAtRef.current =
+            input.length === 0 ? null : now;
+        setCurrentInput(input);
+    }, []);
+
     const handleSuccess = useCallback(() => {
         if (successAudioRef.current && initialSounDeffects) {
             successAudioRef.current.currentTime = 0;
@@ -393,6 +426,8 @@ export default function Client({
         }
 
         setCurrentInput("");
+        previousInputAtRef.current = null;
+        previousInputLengthRef.current = 0;
 
         const nextTurn =
             (currentTurnRef.current + 1) %
@@ -518,11 +553,13 @@ export default function Client({
             return;
         }
 
-        const config =
-            BOT_TYPING[
-                currentTurnUser.id as keyof typeof BOT_TYPING
-            ];
-        if (!config) return;
+        const charDelay = clampTypingDelay(
+            userTypingDelayRef.current,
+        );
+        const initialDelay = Math.min(
+            1000,
+            Math.max(250, charDelay * 2.5),
+        );
 
         const target = currentItem.answer;
         let charIndex = 0;
@@ -537,9 +574,10 @@ export default function Client({
                 setCurrentInput(
                     target.slice(0, charIndex),
                 );
+                const jitter = 0.9 + Math.random() * 0.2;
                 timer = setTimeout(
                     typeNextCharacter,
-                    config.charDelay,
+                    Math.round(charDelay * jitter),
                 );
                 return;
             }
@@ -551,7 +589,7 @@ export default function Client({
 
         timer = setTimeout(
             typeNextCharacter,
-            config.initialDelay,
+            initialDelay,
         );
 
         return () => {
@@ -650,7 +688,7 @@ export default function Client({
             bombRef={bombRef}
             explosionLayer={explosionLayer}
             onSuccess={handleSuccess}
-            onChangeInput={setCurrentInput}
+            onChangeInput={handleInputChange}
             onRecallProgress={handleRecallProgress}
             onRecallComplete={handleRecallComplete}
             hintIntervalsMs={hintIntervalsMs}
