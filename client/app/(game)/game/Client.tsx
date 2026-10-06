@@ -5,12 +5,13 @@ import { useRouter } from "next/navigation";
 import { io } from "@/lib/room/socket";
 import { useBombExplosion } from "@/components/feature/BombExplosion";
 import GameView from "@/components/feature/GameView";
-import { Room, Word, User } from "@/type";
+import { Item, Room, User } from "@/type";
 import { getAuthToken } from "@/lib/room/auth";
 import { isTrustedServerUrl, resolveServerUrl } from "@/lib/room/serverUrl";
 import { Position } from "@/type";
 import { newPositions } from "@/lib/ui/position";
 import posthog from "posthog-js";
+import { getRoomItems } from "@/lib/item";
 
 type Props = {
     initialBackgroundMusic: boolean;
@@ -33,7 +34,7 @@ export default function Clinet({
     const [room, setRoom] = useState<Room | null>(null);
     const [serverError, setServerError] = useState<string | null>(null);
     const [users, setUsers] = useState<User[]>([]);
-    const [currentWord, setCurrentWord] = useState<Word | null>(null);
+    const [currentItem, setCurrentItem] = useState<Item | null>(null);
     const [currentTurn, setCurrentTurn] = useState<number>(0);
     const [displayName] = useState<string>(() => {
         if (typeof window === "undefined") return "";
@@ -245,9 +246,12 @@ export default function Clinet({
                     );
                     setIsStarted(newRoom.isStart);
                     setCurrentTurn(newRoom.bombHolder);
-                    if (newRoom.wordIndex !== undefined && newRoom.words)
-                        setCurrentWord(newRoom.words[newRoom.wordIndex]);
-                    else setCurrentWord(null);
+                    if (newRoom.wordIndex !== undefined) {
+                        const items = getRoomItems(newRoom);
+                        setCurrentItem(items[newRoom.wordIndex] ?? null);
+                    } else {
+                        setCurrentItem(null);
+                    }
                     setBombStatus(newRoom.bombStatus);
                     setUserPositions(
                         newPositions(newRoom.users, userPositions),
@@ -507,7 +511,7 @@ export default function Clinet({
             userId={userId}
             currentTurn={currentTurn}
             bombStatus={bombStatus ?? 0}
-            currentWord={currentWord}
+            currentItem={currentItem}
             currentInput={currentInput}
             isStarted={isStarted}
             isSpectator={isSpectator}
