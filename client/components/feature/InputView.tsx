@@ -67,6 +67,7 @@ export default function TypingView({
     const [input, setInput] = useState<string[]>(
         english ? Array(english.length).fill("") : [],
     );
+    const inputStateRef = useRef(input);
     const [currentSelection, setCurrentSelection] = useState(0);
     const inputRef = useRef<HTMLInputElement | null>(null);
     const inputFrameRef = useRef<HTMLDivElement | null>(null);
@@ -97,6 +98,10 @@ export default function TypingView({
     }
 
     const isReadonly = currentInput !== null;
+
+    useEffect(() => {
+        inputStateRef.current = input;
+    }, [input]);
 
     useEffect(() => {
         if (isReadonly || !english) return;
@@ -136,6 +141,13 @@ export default function TypingView({
                 setTimedHintCount((count) =>
                     Math.min(count + 1, english.length),
                 );
+                setRevealedHintLength((currentLength) => {
+                    const nextHintLength = Math.min(
+                        english.length,
+                        correctPrefixLength(inputStateRef.current, english) + 1,
+                    );
+                    return Math.max(currentLength, nextHintLength);
+                });
                 hintIndex += 1;
                 scheduleNextHint();
             }, delay);
@@ -218,23 +230,10 @@ export default function TypingView({
     };
 
     const hintCount = baseHintCount + timedHintCount;
-    const calculatedHintLength = english
-        ? Math.min(
-              english.length,
-              correctPrefixLength(input, english) + hintCount,
-          )
-        : 0;
-    const hintLength = Math.max(
-        revealedHintLength,
-        calculatedHintLength,
-    );
+    const hintLength = revealedHintLength;
 
     useEffect(() => {
         if (isReadonly || !english || hintLength === 0) return;
-
-        if (hintLength > revealedHintLength) {
-            setRevealedHintLength(hintLength);
-        }
 
         const hasWrongHintedCharacter = input
             .slice(0, hintLength)
@@ -262,7 +261,6 @@ export default function TypingView({
         input,
         isReadonly,
         onChangeInput,
-        revealedHintLength,
     ]);
 
     useEffect(() => {
