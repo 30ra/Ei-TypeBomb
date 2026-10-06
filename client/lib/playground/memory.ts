@@ -73,7 +73,7 @@ export type TurnPlan = {
     difficulty: number;
     initialCueRatio: number;
     cueSteps: number[];
-    stallMs: number | null;
+    hintDelaysMs: number[] | null;
     bombPressure: "paused" | "low" | "normal";
     countsAsRecall: boolean;
 };
@@ -290,7 +290,7 @@ export const createTurnPlan = (
     difficulty: memory?.difficulty ?? 5,
     initialCueRatio: 0,
     cueSteps: [0.2, 0.4, 0.7, 1],
-    stallMs: 4_000,
+    hintDelaysMs: [2_000, 2_500, 3_000, 3_500],
     bombPressure: "normal",
     countsAsRecall: true,
 });
