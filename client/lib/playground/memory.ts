@@ -58,11 +58,22 @@ export type TurnPlan = {
     countsAsRecall: boolean;
 };
 
+export type SessionLearningState = {
+    phase: "encoding" | "supported_recall" | "free_recall" | "graduated";
+    freeRecallSuccesses: number;
+    lastFreeRecallTurn: number | null;
+    lastSeenTurn: number;
+    lastCueRatio: number;
+    relearningSinceLastFreeRecall: boolean;
+};
+
 const INITIAL_ENCODING_STABILITY = 0.15;
 const RELEARNING_ENCODING_GAIN = 0.15;
 const FAILURE_PENALTY = 0.55;
 const LOW_CUE_THRESHOLD = 0.2;
 const CUE_STEPS = [0.2, 0.4, 0.7, 1] as const;
+const MAX_ACTIVE_LEARNING_ITEMS = 4;
+const MIN_INTERVENING_TURNS = 4;
 
 export const toMemoryState = (row: {
     user_id: string;
@@ -273,21 +284,102 @@ export const chooseNextItem = ({
     memoryByItem,
     recentItemIds,
     activeRecall,
+    sessionByItem = {},
+    currentTurnNumber = 0,
 }: {
     items: Item[];
     memoryByItem: Record<string, ItemMemoryState>;
     recentItemIds: string[];
     activeRecall: boolean;
+    sessionByItem?: Record<string, SessionLearningState>;
+    currentTurnNumber?: number;
 }) => {
     if (items.length === 0) return null;
     if (items.length === 1) return items[0];
 
-    const cooldown = new Set(recentItemIds.slice(-4));
-    const availableItems = items.some((item) => !cooldown.has(item.id))
-        ? items.filter((item) => !cooldown.has(item.id))
-        : items;
+    const cooldown = new Set(recentItemIds.slice(-3));
+    const notRecentlySeen = (item: Item) => !cooldown.has(item.id);
 
-    const ranked = availableItems
+    // Bot turns are rhythm-only: never introduce an unseen word.
+    if (!activeRecall) {
+        const seenItems = items.filter(
+            (item) => (memoryByItem[item.id]?.reviewCount ?? 0) > 0,
+        );
+        const botPool =
+            seenItems.filter(notRecentlySeen).length > 0
+                ? seenItems.filter(notRecentlySeen)
+                : seenItems.length > 0
+                  ? seenItems
+                  : items;
+
+        return (
+            [...botPool]
+                .sort(
+                    (a, b) =>
+                        getItemPriority({
+                            item: a,
+                            memory: memoryByItem[a.id],
+                            recentItemIds,
+                        }) -
+                        getItemPriority({
+                            item: b,
+                            memory: memoryByItem[b.id],
+                            recentItemIds,
+                        }),
+                )[0] ?? items[0]
+        );
+    }
+
+    const activeStates = Object.values(sessionByItem).filter(
+        (state) => state.phase !== "graduated",
+    );
+    const activeCount = activeStates.length;
+
+    const dueSessionItems = items
+        .filter((item) => {
+            const state = sessionByItem[item.id];
+            if (!state || state.phase === "graduated") return false;
+            return (
+                currentTurnNumber - state.lastSeenTurn >=
+                MIN_INTERVENING_TURNS
+            );
+        })
+        .sort((a, b) => {
+            const aState = sessionByItem[a.id];
+            const bState = sessionByItem[b.id];
+            return aState.lastSeenTurn - bState.lastSeenTurn;
+        });
+
+    if (dueSessionItems.length > 0) {
+        return dueSessionItems[0];
+    }
+
+    const supportedSessionItems = items
+        .filter((item) => {
+            const state = sessionByItem[item.id];
+            return (
+                state &&
+                state.phase !== "graduated" &&
+                notRecentlySeen(item)
+            );
+        })
+        .sort((a, b) => {
+            const aState = sessionByItem[a.id];
+            const bState = sessionByItem[b.id];
+            return aState.lastSeenTurn - bState.lastSeenTurn;
+        });
+
+    if (supportedSessionItems.length > 0) {
+        return supportedSessionItems[0];
+    }
+
+    const longTermItems = items
+        .filter(
+            (item) =>
+                !sessionByItem[item.id] &&
+                (memoryByItem[item.id]?.reviewCount ?? 0) > 0,
+        )
+        .filter(notRecentlySeen)
         .map((item) => ({
             item,
             score: getItemPriority({
@@ -296,20 +388,50 @@ export const chooseNextItem = ({
                 recentItemIds,
             }),
         }))
-        .sort((a, b) =>
-            activeRecall ? b.score - a.score : a.score - b.score,
+        .sort((a, b) => b.score - a.score);
+
+    if (longTermItems.length > 0) {
+        return longTermItems[0].item;
+    }
+
+    if (activeCount < MAX_ACTIVE_LEARNING_ITEMS) {
+        const unseen = items.find(
+            (item) =>
+                !sessionByItem[item.id] &&
+                (memoryByItem[item.id]?.reviewCount ?? 0) === 0 &&
+                notRecentlySeen(item),
         );
+        if (unseen) return unseen;
+    }
 
-    return ranked[0]?.item ?? null;
+    // Never stop play just because nothing is due. Reuse the best
+    // available learned/active item as an early-extra review.
+    const fallbackPool =
+        items.filter(notRecentlySeen).length > 0
+            ? items.filter(notRecentlySeen)
+            : items;
+
+    return (
+        [...fallbackPool]
+            .map((item) => ({
+                item,
+                score: getItemPriority({
+                    item,
+                    memory: memoryByItem[item.id],
+                    recentItemIds,
+                }),
+            }))
+            .sort((a, b) => b.score - a.score)[0]?.item ?? items[0]
+    );
 };
-
 export const createTurnPlan = (
     memory: ItemMemoryState | undefined,
+    session?: SessionLearningState,
 ): TurnPlan => {
     const retrievability = getRetrievability(memory);
     const difficulty = memory?.difficulty ?? 5;
 
-    if (!memory || memory.reviewCount === 0) {
+    if (session?.phase === "encoding" || (!memory && !session)) {
         return {
             mode: "encoding",
             retrievalWindowMs: 0,
@@ -323,6 +445,42 @@ export const createTurnPlan = (
         };
     }
 
+    if (session?.phase === "supported_recall") {
+        const initialCueRatio = clamp(
+            session.lastCueRatio || 0.5,
+            0.2,
+            0.7,
+        );
+        return {
+            mode: "supported_recall",
+            retrievalWindowMs: 22_000,
+            retrievability,
+            difficulty,
+            initialCueRatio,
+            cueSteps: CUE_STEPS.filter(
+                (ratio) => ratio > initialCueRatio,
+            ),
+            stallMs: 2_500,
+            bombPressure: "low",
+            countsAsRecall: true,
+        };
+    }
+
+    if (session?.phase === "free_recall") {
+        return {
+            mode: "free_recall",
+            retrievalWindowMs: 18_000,
+            retrievability,
+            difficulty,
+            initialCueRatio: 0,
+            cueSteps: [...CUE_STEPS],
+            stallMs: 4_000,
+            bombPressure: "normal",
+            countsAsRecall: true,
+        };
+    }
+
+    // Existing/graduated items are scheduled only by the long-term model.
     if (retrievability < 0.35) {
         return {
             mode: "relearning",
@@ -337,19 +495,14 @@ export const createTurnPlan = (
         };
     }
 
-    if (memory.reviewCount <= 2 || retrievability < 0.72) {
-        const initialCueRatio =
-            memory.reviewCount <= 1 ? 0.5 : 0.2;
-
+    if (retrievability < 0.72) {
         return {
             mode: "supported_recall",
             retrievalWindowMs: 22_000,
             retrievability,
             difficulty,
-            initialCueRatio,
-            cueSteps: CUE_STEPS.filter(
-                (ratio) => ratio > initialCueRatio,
-            ),
+            initialCueRatio: 0.2,
+            cueSteps: CUE_STEPS.filter((ratio) => ratio > 0.2),
             stallMs: 2_500,
             bombPressure: "low",
             countsAsRecall: true,
