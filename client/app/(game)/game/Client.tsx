@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { io } from "@/lib/room/socket";
 import { useBombExplosion } from "@/components/feature/BombExplosion";
 import GameView from "@/components/feature/GameView";
+import type { GameNoticeProps } from "@/components/feature/GameNotice";
 import { Item, LegacyWord, Room, User } from "@/type";
 import { getAuthToken } from "@/lib/room/auth";
 import { isTrustedServerUrl, resolveServerUrl } from "@/lib/room/serverUrl";
@@ -51,7 +52,12 @@ export default function Clinet({
     const [isStarted, setIsStarted] = useState<boolean>(false);
     const router = useRouter();
     const [isSpectator, setIsSpectator] = useState<boolean>(false);
-    const [connectionAlert, setConnectionAlert] = useState<null | number>(null);
+    const [notice, setNotice] = useState<GameNoticeProps>({
+        visible: false,
+        iconName: "globeOff",
+        title: "接続が切れました",
+        description: "プレイヤーがルームから退出しました。",
+    });
     const [result, setResult] = useState<boolean | null>(null);
     const [currentInput, setCurrentInput] = useState("");
     const [lostDisplayName, setLostDisplayName] = useState<string | null>();
@@ -79,6 +85,26 @@ export default function Clinet({
         let secondaryUnavailable = false;
         let primaryTimer: ReturnType<typeof setTimeout> | null = null;
         let secondaryTimer: ReturnType<typeof setTimeout> | null = null;
+        let noticeTimer: ReturnType<typeof setTimeout> | null = null;
+
+        const showNotice = (
+            nextNotice: Omit<GameNoticeProps, "visible">,
+        ) => {
+            if (noticeTimer) clearTimeout(noticeTimer);
+
+            setNotice({
+                ...nextNotice,
+                visible: true,
+            });
+
+            noticeTimer = setTimeout(() => {
+                setNotice((current) => ({
+                    ...current,
+                    visible: false,
+                }));
+                noticeTimer = null;
+            }, 3000);
+        };
 
         type ServerTier = "primary" | "secondary" | "fallback";
         type Candidate = {
@@ -139,6 +165,7 @@ export default function Clinet({
             selected = true;
             clearPrimaryTimer();
             clearSecondaryTimer();
+            if (noticeTimer) clearTimeout(noticeTimer);
             socketRef.current = candidate.socket;
 
             for (const other of [
@@ -167,6 +194,14 @@ export default function Clinet({
                 posthog.capture("secondary_server_connected", {
                     connection_time_ms: connectionTimeMs,
                 });
+                if (process.env.NEXT_PUBLIC_DEVELOPER_MODE === "true") {
+                    showNotice({
+                        iconName: "serverOff",
+                        title: "セカンダリサーバーに切り替えました",
+                        description:
+                            "プライマリサーバーに接続できなかったため、セカンダリサーバーを使用しています。",
+                    });
+                }
             } else {
                 console.warn(
                     "Primary and secondary servers unavailable. Switching to fallback server.",
@@ -174,6 +209,14 @@ export default function Clinet({
                 posthog.capture("fallback_server_connected", {
                     connection_time_ms: connectionTimeMs,
                 });
+                if (process.env.NEXT_PUBLIC_DEVELOPER_MODE === "true") {
+                    showNotice({
+                        iconName: "serverOff",
+                        title: "フォールバックサーバーに切り替えました",
+                        description:
+                            "プライマリとセカンダリに接続できなかったため、フォールバックサーバーを使用しています。",
+                    });
+                }
             }
 
             if (candidate.ready) {
@@ -275,13 +318,13 @@ export default function Clinet({
 
             socket.on("game:quited", () => {
                 if (!selected || socketRef.current !== socket) return;
-                setConnectionAlert(1);
+                showNotice({
+                    iconName: "globeOff",
+                    title: "接続が切れました",
+                    description: "プレイヤーがルームから退出しました。",
+                });
                 console.log("game quited");
                 posthog.capture("game_quited");
-
-                setTimeout(() => {
-                    setConnectionAlert(null);
-                }, 3000);
             });
 
             socket.on("auth:request", () => {
@@ -525,7 +568,7 @@ export default function Clinet({
             isStarted={isStarted}
             isSpectator={isSpectator}
             serverError={serverError}
-            connectionAlert={connectionAlert !== null}
+            notice={notice}
             result={result}
             lostDisplayName={lostDisplayName}
             bombRef={bombRef}
