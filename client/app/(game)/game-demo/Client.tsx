@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useBombExplosion } from "@/components/feature/BombExplosion";
 import GameView from "@/components/feature/GameView";
-import { Room, Word, User, Position } from "@/type";
+import { Item, Room, User, Position } from "@/type";
 import { newPositions } from "@/lib/ui/position";
 import posthog from "posthog-js";
 import Button from "@/components/ui/Button";
@@ -14,45 +14,54 @@ type Props = {
     initialSounDeffects: boolean;
 };
 
-const MOCK_WORDS: Word[] = [
-    { jp: "見る", en: "see" },
-    { jp: "見る", en: "look" },
-    { jp: "りんご", en: "apple" },
-    { jp: "猫", en: "cat" },
-    { jp: "犬", en: "dog" },
-    { jp: "太陽", en: "sun" },
-    { jp: "月", en: "moon" },
-    { jp: "星", en: "star" },
-    { jp: "水", en: "water" },
-    { jp: "火", en: "fire" },
-    { jp: "本", en: "book" },
-    { jp: "学校", en: "school" },
-    { jp: "未来", en: "future" },
-    { jp: "技術", en: "technology" },
-    { jp: "科学", en: "science" },
-    { jp: "世界", en: "world" },
-    { jp: "自然", en: "nature" },
-    { jp: "冒険", en: "adventure" },
-    { jp: "挑戦", en: "challenge" },
-    { jp: "創造", en: "create" },
-    { jp: "発見", en: "discover" },
-    { jp: "成長", en: "growth" },
-    { jp: "コンピューター", en: "computer" },
-    { jp: "プログラム", en: "program" },
-    { jp: "インターネット", en: "internet" },
-    { jp: "人工知能", en: "ai" },
-    { jp: "ロボット", en: "robot" },
-    { jp: "ゲーム", en: "game" },
-    { jp: "音楽", en: "music" },
-    { jp: "映画", en: "movie" },
-    { jp: "写真", en: "photo" },
-    { jp: "旅行", en: "travel" },
-    { jp: "素晴らしい", en: "amazing" },
-    { jp: "楽しい", en: "fun" },
-    { jp: "速い", en: "fast" },
-    { jp: "強い", en: "strong" },
-    { jp: "美しい", en: "beautiful" },
-];
+const MOCK_ITEM_CONTENT = [
+    ["見る", "see"],
+    ["見る", "look"],
+    ["りんご", "apple"],
+    ["猫", "cat"],
+    ["犬", "dog"],
+    ["太陽", "sun"],
+    ["月", "moon"],
+    ["星", "star"],
+    ["水", "water"],
+    ["火", "fire"],
+    ["本", "book"],
+    ["学校", "school"],
+    ["未来", "future"],
+    ["技術", "technology"],
+    ["科学", "science"],
+    ["世界", "world"],
+    ["自然", "nature"],
+    ["冒険", "adventure"],
+    ["挑戦", "challenge"],
+    ["創造", "create"],
+    ["発見", "discover"],
+    ["成長", "growth"],
+    ["コンピューター", "computer"],
+    ["プログラム", "program"],
+    ["インターネット", "internet"],
+    ["人工知能", "ai"],
+    ["ロボット", "robot"],
+    ["ゲーム", "game"],
+    ["音楽", "music"],
+    ["映画", "movie"],
+    ["写真", "photo"],
+    ["旅行", "travel"],
+    ["素晴らしい", "amazing"],
+    ["楽しい", "fun"],
+    ["速い", "fast"],
+    ["強い", "strong"],
+    ["美しい", "beautiful"],
+] as const;
+
+const MOCK_ITEMS: Item[] = MOCK_ITEM_CONTENT.map(
+    ([prompt, answer], index) => ({
+        id: `demo-${index}`,
+        type: "typed_recall",
+        prompt,
+        answer,
+    }),
+);
 
 const LOCAL_USER_ID = "player-1";
 
@@ -83,11 +92,11 @@ export default function Client({
             { id: "bot-1", displayName: "ボット1" },
             { id: "bot-2", displayName: "ボット2" },
         ],
-        words: MOCK_WORDS,
+        items: MOCK_ITEMS,
         title: "デモルーム",
     }));
 
-    const [currentWord, setCurrentWord] = useState<Word | null>(null);
+    const [currentItem, setCurrentItem] = useState<Item | null>(null);
     const [currentTurn, setCurrentTurn] = useState<number>(0);
     const [bombStatus, setBombStatus] = useState<number>(0);
     const [isStarted, setIsStarted] = useState<boolean>(true);
@@ -134,13 +143,13 @@ export default function Client({
         setIsStarted(true);
         setBombStatus(0);
         setCurrentTurn(Math.floor(Math.random() * users.length));
-        setCurrentWord(null);
+        setCurrentItem(null);
         setCurrentInput("");
         setResult(null);
         setLostDisplayName(null);
         setTimeout(() => {
-            setCurrentWord(
-                MOCK_WORDS[Math.floor(Math.random() * MOCK_WORDS.length)],
+            setCurrentItem(
+                MOCK_ITEMS[Math.floor(Math.random() * MOCK_ITEMS.length)],
             );
         }, 3000);
     }, [users.length, resetExplosion]);
@@ -167,8 +176,8 @@ export default function Client({
 
         setCurrentInput("");
         setCurrentTurn((prev) => (prev + 1) % users.length);
-        setCurrentWord(
-            MOCK_WORDS[Math.floor(Math.random() * MOCK_WORDS.length)],
+        setCurrentItem(
+            MOCK_ITEMS[Math.floor(Math.random() * MOCK_ITEMS.length)],
         );
 
         posthog.capture("word_succeeded");
@@ -199,7 +208,7 @@ export default function Client({
         if (
             !isStarted ||
             result !== null ||
-            !currentWord ||
+            !currentItem ||
             currentTurnUser?.id === userId
         )
             return;
@@ -207,7 +216,9 @@ export default function Client({
         let timeoutId: NodeJS.Timeout;
         let isCancelled = false;
 
-        const target = currentWord.en;
+        if (currentItem.type !== "typed_recall") return;
+
+        const target = currentItem.answer;
         let charIndex = 0;
 
         const typeNextChar = () => {
@@ -238,7 +249,7 @@ export default function Client({
     }, [
         isStarted,
         currentTurn,
-        currentWord,
+        currentItem,
         result,
         currentTurnUser,
         userId,
@@ -289,7 +300,7 @@ export default function Client({
             userId={userId}
             currentTurn={currentTurn}
             bombStatus={bombStatus}
-            currentWord={currentWord}
+            currentItem={currentItem}
             currentInput={currentInput}
             isStarted={isStarted}
             result={result}

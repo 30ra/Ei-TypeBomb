@@ -28,7 +28,14 @@ export class GameRoom extends DurableObject<WorkerEnv> {
 		}
 	}
 	private snapshot() {
-		if (this.game) this.broadcast('room:broadcast', this.game.room);
+		if (!this.game) return;
+		this.broadcast('room:broadcast', {
+			...this.game.room,
+			words: this.game.room.items.map((item) => ({
+				jp: item.prompt,
+				en: item.answer,
+			})),
+		});
 	}
 	private track(event: string, properties: Record<string, unknown> = {}) {
 		console.log(JSON.stringify({ event, roomId: this.game?.room.id, ...properties }));
@@ -183,7 +190,7 @@ export class GameRoom extends DurableObject<WorkerEnv> {
 					case 'word:success':
 						if (!room.isStart || this.game.wordAt || room.users[room.bombHolder]?.id !== session.id) return;
 						room.bombHolder = (room.bombHolder + 1) % room.users.length;
-						room.wordIndex = Math.floor(Math.random() * room.words.length);
+						room.wordIndex = Math.floor(Math.random() * room.items.length);
 						this.broadcast('typing:input', { input: '' });
 						break;
 					case 'game:start': {
@@ -270,7 +277,7 @@ export class GameRoom extends DurableObject<WorkerEnv> {
 				const room = this.game.room;
 				if (this.game.wordAt && this.game.wordAt <= now) {
 					this.game.wordAt = undefined;
-					room.wordIndex = Math.floor(Math.random() * room.words.length);
+					room.wordIndex = Math.floor(Math.random() * room.items.length);
 					this.broadcast('typing:input', { input: '' });
 				}
 				if (this.game.bombAt && this.game.bombAt <= now) {

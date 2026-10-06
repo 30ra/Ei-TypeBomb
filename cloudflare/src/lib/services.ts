@@ -24,26 +24,30 @@ export async function getRoom(env: Secrets, id: string): Promise<Room> {
 	});
 	const { data, error } = await db
 		.from('ei_typebomb_rooms')
-		.select('id,title,user_id,explanation,max_players,game_duration,created_at,updated_at,words')
+		.select('id,title,user_id,explanation,max_players,game_duration,created_at,updated_at,items')
 		.eq('id', id)
 		.abortSignal(AbortSignal.timeout(10_000))
 		.maybeSingle();
 	if (error) throw new Error(`Room lookup failed: ${error.code}`);
 	if (!data) throw new ClientError('ルーム情報を取得できませんでした。ルームを確認して再度お試しください。');
 	if (
-		!Array.isArray(data.words) ||
-		!data.words.length ||
-		data.words.some(
-			(word: unknown) =>
-				!word ||
-				typeof word !== 'object' ||
-				!('jp' in word) ||
-				!('en' in word) ||
-				typeof word.jp !== 'string' ||
-				typeof word.en !== 'string',
+		!Array.isArray(data.items) ||
+		!data.items.length ||
+		data.items.some(
+			(item: unknown) =>
+				!item ||
+				typeof item !== 'object' ||
+				!('id' in item) ||
+				!('type' in item) ||
+				!('prompt' in item) ||
+				!('answer' in item) ||
+				typeof item.id !== 'string' ||
+				item.type !== 'typed_recall' ||
+				typeof item.prompt !== 'string' ||
+				typeof item.answer !== 'string',
 		)
 	)
-		throw new ClientError('ルームに単語が設定されていません。単語を設定してから再度お試しください。');
+		throw new ClientError('ルームに問題が設定されていません。問題を設定してから再度お試しください。');
 	return {
 		id: data.id,
 		title: data.title,
@@ -53,7 +57,7 @@ export async function getRoom(env: Secrets, id: string): Promise<Room> {
 		gameDuration: data.game_duration ?? 20,
 		createdAt: data.created_at,
 		updatedAt: data.updated_at,
-		words: data.words,
+		items: data.items,
 		users: [],
 		isStart: false,
 		bombHolder: 0,
