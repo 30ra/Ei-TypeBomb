@@ -8,6 +8,7 @@ type Props = {
     hasDuplicatePrompt?: boolean;
     onSuccess: () => void;
     onChangeInput: (input: string) => void;
+    enableRemoteTypingSync?: boolean;
 };
 
 export default function ItemView(props: Readonly<Props>) {
