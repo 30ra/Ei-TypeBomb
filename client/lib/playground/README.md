@@ -1,9 +1,9 @@
-# Playground learning model (v2)
+# Playground learning model (v3)
 
 `memory.ts` owns learning transitions and scheduling. `recall-input.ts` owns cue rounding and input checks. Run regression checks with `npm --prefix client run test:playground` from the repository root.
 
 - Encoding shows the answer and pauses the bomb. Supported recall reduces the **requested cue stage** after two successes without additional hints. Two separated successes with no answer-character cues graduate an item. The Japanese prompt remains visible: `free_recall` is an application label, not the research definition of free recall.
-- At most four unfinished items are admitted to the session. When nothing is due, play continues with an admitted or graduated item. A success immediately after an answer exposure is `early_extra`: it records the attempt but does not advance the phase, stability, difficulty, or last evaluated review time. Failures still cause relearning.
+- At most four unfinished items are active at once. Fill this block before repeating due items. After ten user answers on an unfinished item (including hint-assisted answers and failures), defer it and admit another item. Rotation does not imply mastery: preserve the unfinished phase and cue stage, prioritize items not yet practiced this session, then resume deferred items in oldest-first order. The block attempt count resets when an item resumes and is not a long-term memory metric. When nothing is due, play continues with an admitted or graduated item. A success immediately after an answer exposure is `early_extra`: it records the attempt but does not advance the phase, stability, difficulty, or last evaluated review time. Failures still cause relearning.
 - Separation means four intervening presentation turns, or at least 30 seconds since the previous answer exposure. BOT answers count as exposures. BOTs prefer graduated items; otherwise they repeat the most recent answered item to avoid revealing the next target.
 - Phase, cue stage, and success counters persist in `learning_state`; exposures persist in `last_presented_at`. Session turn indices do not persist. Legacy rows without learning state restart at supported recall instead of assuming that five observations imply graduation.
 - Saves are serialized and retried. An authenticated-user/room-scoped local queue preserves unsent updates across reloads. Local storage and network failures can still prevent persistence; the UI reports failed network saves.
@@ -11,7 +11,7 @@
 
 ## Scientific limits
 
-The model uses `R = exp(-elapsedDays / S)`, so `S` is the number of days until predicted retrievability reaches approximately 36.8%. It is not an empirically fitted value or an FSRS stability parameter. Initial stability, gain/penalty coefficients, cue timing, two-success graduation, four-item admission, and the 30-second fallback are product hypotheses. Difficulty adjusts the time window, but the resulting duration is not a measured optimal retrieval time.
+The model uses `R = exp(-elapsedDays / S)`, so `S` is the number of days until predicted retrievability reaches approximately 36.8%. It is not an empirically fitted value or an FSRS stability parameter. Initial stability, gain/penalty coefficients, cue timing, two-success graduation, four-item admission, ten-answer rotation, and the 30-second fallback are product hypotheses. Difficulty adjusts the time window, but the resulting duration is not a measured optimal retrieval time.
 
 Retrieval practice and spacing have experimental support: [Karpicke & Roediger (2008)](https://learninglab.psych.purdue.edu/downloads/2008/2008_Karpicke_Roediger_Science.pdf), [Cepeda et al. (2008)](https://www.yorku.ca/ncepeda/publications/CVRWP2008.pdf), and [Finn & Metcalfe (2010)](https://www.columbia.edu/cu/psychology/metcalfe/PDFs/FinnMetcalfe2010.pdf). These studies do not validate this application's coefficients. Four-item admission is not implied by a four-chunk working-memory capacity.
 

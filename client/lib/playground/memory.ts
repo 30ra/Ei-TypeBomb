@@ -66,6 +66,8 @@ export type SessionLearningState = {
     lastCueRatio: number;
     relearningSinceLastFreeRecall: boolean;
     cueSuccessStreak: number;
+    practiceAttempts?: number;
+    deferred?: boolean;
 };
 
 const INITIAL_ENCODING_STABILITY = 0.15;
@@ -74,7 +76,8 @@ const LOW_CUE_THRESHOLD = 0.2;
 const CUE_STEPS = [0.2, 0.4, 0.7, 1] as const;
 export const MAX_ACTIVE_LEARNING_ITEMS = 4;
 export const MIN_INTERVENING_TURNS = 4;
-export const MEMORY_MODEL_VERSION = "playground-v2";
+export const MAX_PRACTICE_ATTEMPTS_PER_BLOCK = 10;
+export const MEMORY_MODEL_VERSION = "playground-v3";
 
 export type PersistedLearningState = Pick<
     SessionLearningState,
@@ -112,7 +115,7 @@ export const persistSessionLearning = (
     cueSuccessStreak: state.cueSuccessStreak,
 });
 
-export const updateSessionLearning = (
+const advanceLearningPhase = (
     current: SessionLearningState,
     observation: RecallObservation,
     turn: number,
@@ -187,6 +190,23 @@ export const updateSessionLearning = (
         lastCueRatio: supported ? nextCue : Math.min(0.7, Math.max(0.2, ratio)),
         cueSuccessStreak: streak >= 2 ? 0 : streak,
         relearningSinceLastFreeRecall: false,
+    };
+};
+
+// Rotation is independent of mastery: needing hints must not block the rest of the room.
+export const updateSessionLearning = (
+    current: SessionLearningState,
+    observation: RecallObservation,
+    turn: number,
+): SessionLearningState => {
+    const next = advanceLearningPhase(current, observation, turn);
+    const practiceAttempts = (current.practiceAttempts ?? 0) + 1;
+    return {
+        ...next,
+        practiceAttempts,
+        deferred:
+            next.phase !== "graduated" &&
+            practiceAttempts >= MAX_PRACTICE_ATTEMPTS_PER_BLOCK,
     };
 };
 
@@ -477,14 +497,38 @@ export const chooseNextItem = ({
     }
 
     const activeStates = Object.values(sessionByItem).filter(
-        (state) => state.phase !== "graduated",
+        (state) => state.phase !== "graduated" && !state.deferred,
     );
     const activeCount = activeStates.length;
+
+    // Fill the active block before repeating due items. Otherwise three items
+    // with alternating BOT turns are always due and starve the fourth item.
+    if (activeCount < MAX_ACTIVE_LEARNING_ITEMS) {
+        const unseenInSession = items.find(
+            (item) =>
+                !sessionByItem[item.id] &&
+                notRecentlySeen(item) &&
+                memoryByItem[item.id]?.learningState?.phase !== "graduated",
+        );
+        if (unseenInSession) return unseenInSession;
+        const deferred = items
+            .filter(
+                (item) =>
+                    sessionByItem[item.id]?.deferred && notRecentlySeen(item),
+            )
+            .sort(
+                (a, b) =>
+                    sessionByItem[a.id].lastSeenTurn -
+                    sessionByItem[b.id].lastSeenTurn,
+            );
+        if (deferred.length > 0) return deferred[0];
+    }
 
     const dueSessionItems = items
         .filter((item) => {
             const state = sessionByItem[item.id];
-            if (!state || state.phase === "graduated") return false;
+            if (!state || state.phase === "graduated" || state.deferred)
+                return false;
             return (
                 currentTurnNumber - state.lastSeenTurn >= MIN_INTERVENING_TURNS
             );
@@ -530,17 +574,6 @@ export const chooseNextItem = ({
         return dueLongTermItems[0].item;
     }
 
-    if (activeCount < MAX_ACTIVE_LEARNING_ITEMS) {
-        const unfinished = items.find((item) => {
-            if (sessionByItem[item.id] || !notRecentlySeen(item)) {
-                return false;
-            }
-
-            return memoryByItem[item.id]?.learningState?.phase !== "graduated";
-        });
-        if (unfinished) return unfinished;
-    }
-
     // Never stop play just because nothing is due. Reuse the best
     // available learned/active item as an early-extra review.
     const nonActiveNotRecent = items.filter((item) => {
@@ -555,7 +588,7 @@ export const chooseNextItem = ({
     });
     const admitted = items.filter(
         (item) =>
-            sessionByItem[item.id] ||
+            (sessionByItem[item.id] && !sessionByItem[item.id].deferred) ||
             memoryByItem[item.id]?.learningState?.phase === "graduated",
     );
     const notRecent = admitted.filter(notRecentlySeen);

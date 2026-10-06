@@ -108,95 +108,177 @@ test("recent BOT exposure is early-extra, while enough turns or elapsed time per
     );
 });
 
-test("two-player scheduling can graduate a set without exceeding four active items", () => {
-    const items = "abcdefgh".split("").map((id, index) => item(id, index + 1));
-    let memories = {},
-        sessions = {},
-        recent = [],
-        turn = 0,
-        time = Date.now();
-    const exposures = {};
-    for (let attempt = 0; attempt < 600; attempt++) {
-        const next = memory.chooseNextItem({
-            items,
-            memoryByItem: memories,
-            recentItemIds: recent,
-            activeRecall: true,
-            sessionByItem: sessions,
-            currentTurnNumber: turn,
-        });
-        turn++;
-        const s =
-            sessions[next.id] ??
-            memory.restoreSessionLearning(memories[next.id], turn);
-        const context = memory.getReviewContext(
-            memories[next.id],
-            s.phase,
-            exposures[next.id],
-            turn,
-            time,
-        );
-        exposures[next.id] = turn;
-        const plan = memory.createTurnPlan(memories[next.id], s);
-        const ratio =
-            input.getInitialCueLength(
-                next.answer.length,
-                plan.initialCueRatio,
-            ) / next.answer.length;
-        const o = observation(ratio, {
-            outcome:
-                plan.mode === "encoding"
-                    ? "encoding"
-                    : ratio === 0
-                      ? "free_recall"
-                      : "cued_recall",
-            initialCueRatio: plan.initialCueRatio,
-            additionalHintCount: 0,
-            reviewContext: context,
-            answerLength: next.answer.length,
-        });
-        time += 1500;
-        sessions[next.id] = memory.updateSessionLearning(s, o, turn);
-        memories[next.id] = {
-            ...memory.applyRecallObservation({
-                memory: memories[next.id],
-                observation: o,
-                userId: "u",
-                roomId: "r",
-                itemId: next.id,
-                now: new Date(time),
-            }),
-            learningState: memory.persistSessionLearning(sessions[next.id]),
-        };
-        recent = [...recent, next.id].slice(-12);
-        assert(
-            Object.values(sessions).filter((x) => x.phase !== "graduated")
-                .length <= 4,
-        );
-        if (items.every((x) => sessions[x.id]?.phase === "graduated")) return;
-        const bot = memory.chooseNextItem({
-            items,
-            memoryByItem: memories,
-            recentItemIds: recent,
-            activeRecall: false,
-            sessionByItem: sessions,
-            currentTurnNumber: turn,
-        });
-        if (bot) {
+for (const [label, items] of [
+    [
+        "mixed lengths",
+        "abcdefgh".split("").map((id, index) => item(id, index + 1)),
+    ],
+    ["eight ordinary words", "abcdefgh".split("").map((id) => item(id, 8))],
+    ["three ordinary words", "abc".split("").map((id) => item(id, 8))],
+    ["hint-assisted words", "abcdefgh".split("").map((id) => item(id, 8))],
+    ["full-answer support", "abcdefgh".split("").map((id) => item(id, 8))],
+])
+    test(`two-player scheduling progresses: ${label}`, () => {
+        let memories = {},
+            sessions = {},
+            recent = [],
+            turn = 0,
+            time = Date.now();
+        const exposures = {};
+        const encountered = new Set();
+        const needsHelp =
+            label === "hint-assisted words" || label === "full-answer support";
+        for (let attempt = 0; attempt < 600; attempt++) {
+            const next = memory.chooseNextItem({
+                items,
+                memoryByItem: memories,
+                recentItemIds: recent,
+                activeRecall: true,
+                sessionByItem: sessions,
+                currentTurnNumber: turn,
+            });
+            encountered.add(next.id);
+            if (needsHelp && encountered.size === items.length) return;
+            if (needsHelp && attempt === 3)
+                assert.equal(
+                    encountered.size,
+                    4,
+                    "Introduce the full block before repeating",
+                );
+            if (needsHelp && attempt >= 50)
+                assert.fail(
+                    "Hint use trapped practice in " +
+                        [...encountered].join(","),
+                );
             turn++;
+            const existing = sessions[next.id];
+            const s = existing?.deferred
+                ? { ...existing, deferred: false, practiceAttempts: 0 }
+                : (existing ??
+                  memory.restoreSessionLearning(memories[next.id], turn));
+            const context = memory.getReviewContext(
+                memories[next.id],
+                s.phase,
+                exposures[next.id],
+                turn,
+                time,
+            );
+            exposures[next.id] = turn;
+            const plan = memory.createTurnPlan(memories[next.id], s);
+            const initialRatio =
+                input.getInitialCueLength(
+                    next.answer.length,
+                    plan.initialCueRatio,
+                ) / next.answer.length;
+            const ratio =
+                plan.mode === "encoding"
+                    ? 1
+                    : label === "full-answer support"
+                      ? 1
+                      : needsHelp
+                        ? Math.max(initialRatio, 0.7)
+                        : initialRatio;
+            const o = observation(ratio, {
+                outcome:
+                    plan.mode === "encoding"
+                        ? "encoding"
+                        : ratio === 0
+                          ? "free_recall"
+                          : ratio === 1
+                            ? "relearned"
+                            : "cued_recall",
+                initialCueRatio: plan.initialCueRatio,
+                additionalHintCount: needsHelp ? 1 : 0,
+                reviewContext: context,
+                answerLength: next.answer.length,
+            });
             time += 1500;
-            exposures[bot.id] = turn;
-            if (sessions[bot.id])
-                sessions[bot.id] = { ...sessions[bot.id], lastSeenTurn: turn };
-            memories[bot.id] = {
-                ...memories[bot.id],
-                lastPresentedAt: new Date(time).toISOString(),
+            sessions[next.id] = memory.updateSessionLearning(s, o, turn);
+            memories[next.id] = {
+                ...memory.applyRecallObservation({
+                    memory: memories[next.id],
+                    observation: o,
+                    userId: "u",
+                    roomId: "r",
+                    itemId: next.id,
+                    now: new Date(time),
+                }),
+                learningState: memory.persistSessionLearning(sessions[next.id]),
             };
-            recent = [...recent, bot.id].slice(-12);
+            recent = [...recent, next.id].slice(-12);
+            assert(
+                Object.values(sessions).filter(
+                    (x) => x.phase !== "graduated" && !x.deferred,
+                ).length <= 4,
+            );
+            if (items.every((x) => sessions[x.id]?.phase === "graduated"))
+                return;
+            const bot = memory.chooseNextItem({
+                items,
+                memoryByItem: memories,
+                recentItemIds: recent,
+                activeRecall: false,
+                sessionByItem: sessions,
+                currentTurnNumber: turn,
+            });
+            if (bot) {
+                turn++;
+                time += 1500;
+                exposures[bot.id] = turn;
+                if (sessions[bot.id])
+                    sessions[bot.id] = {
+                        ...sessions[bot.id],
+                        lastSeenTurn: turn,
+                    };
+                memories[bot.id] = {
+                    ...memories[bot.id],
+                    lastPresentedAt: new Date(time).toISOString(),
+                };
+                recent = [...recent, bot.id].slice(-12);
+            }
         }
+        assert.fail(
+            "The scheduler never completed the set: " +
+                JSON.stringify(sessions),
+        );
+    });
+
+test("rotation retains unfinished learning and resumes deferred items after fresh items", () => {
+    let current = state();
+    for (
+        let attempt = 1;
+        attempt <= memory.MAX_PRACTICE_ATTEMPTS_PER_BLOCK;
+        attempt++
+    ) {
+        current = memory.updateSessionLearning(
+            current,
+            observation(1),
+            attempt * 6,
+        );
     }
-    assert.fail(
-        "The scheduler never completed the set: " + JSON.stringify(sessions),
+    assert.equal(current.deferred, true);
+    assert.equal(current.phase, "supported_recall");
+    const saved = memory.persistSessionLearning(current);
+    const restored = memory.restoreSessionLearning(
+        { ...initial(), learningState: saved },
+        100,
+    );
+    assert.equal(restored.phase, "supported_recall");
+    assert.equal(restored.lastCueRatio, current.lastCueRatio);
+    assert.equal(restored.deferred, undefined);
+    const items = [item("a"), item("b")];
+    const params = {
+        items,
+        memoryByItem: { a: { ...initial(), learningState: saved } },
+        recentItemIds: [],
+        activeRecall: true,
+        sessionByItem: { a: current },
+        currentTurnNumber: 100,
+    };
+    assert.equal(memory.chooseNextItem(params).id, "b");
+    assert.equal(
+        memory.chooseNextItem({ ...params, items: [items[0]] }).id,
+        "a",
     );
 });
 
@@ -434,6 +516,47 @@ function getCallback(name, globals) {
         .printNode(ts.EmitHint.Expression, callback, ast);
     return evaluate("export const callback = " + printed, globals).callback;
 }
+
+test("the actual presentation callback resumes deferred practice without losing cue stage", () => {
+    const deferred = {
+        ...state(),
+        lastCueRatio: 0.2,
+        cueSuccessStreak: 1,
+        practiceAttempts: 10,
+        deferred: true,
+    };
+    const sessions = { current: { a: deferred } };
+    let displayed;
+    const trackedItem = getCallback("setTrackedItem", {
+        currentItemRef: { current: null },
+        setCurrentItem: () => {},
+        recallProgressRef: { current: null },
+        setRecallPressurePaused: () => {},
+        sessionTurnNumberRef: { current: 80 },
+        setItemPresentationKey: () => {},
+        recentItemIdsRef: { current: [] },
+        usersRef: { current: [{ id: "local" }] },
+        currentTurnRef: { current: 0 },
+        LOCAL_USER_ID: "local",
+        memoryByItemRef: { current: { a: initial() } },
+        lastPresentedTurnRef: { current: { a: 10 } },
+        sessionByItemRef: sessions,
+        previousPresentationTurnRef: { current: undefined },
+        currentReviewContextRef: { current: undefined },
+        getReviewContext: memory.getReviewContext,
+        restoreSessionLearning: memory.restoreSessionLearning,
+        setSessionByItem: (value) => {
+            displayed = value;
+        },
+    });
+    trackedItem(item("a"));
+    assert.equal(sessions.current.a.deferred, false);
+    assert.equal(sessions.current.a.practiceAttempts, 0);
+    assert.equal(sessions.current.a.phase, "supported_recall");
+    assert.equal(sessions.current.a.lastCueRatio, 0.2);
+    assert.equal(sessions.current.a.cueSuccessStreak, 1);
+    assert.equal(displayed, sessions.current);
+});
 
 test("memory sync serializes newer writes and retains unsent data on rejection", async () => {
     const pending = { current: new Map([["a", initial()]]) };

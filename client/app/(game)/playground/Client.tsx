@@ -252,13 +252,18 @@ export default function Client({
             lastPresentedTurnRef.current[item.id] =
                 sessionTurnNumberRef.current;
 
-            if (isLocalTurn && !currentSession) {
+            if (isLocalTurn && (!currentSession || currentSession.deferred)) {
                 sessionByItemRef.current = {
                     ...sessionByItemRef.current,
-                    [item.id]: restoreSessionLearning(
-                        memory,
-                        sessionTurnNumberRef.current,
-                    ),
+                    [item.id]: {
+                        ...(currentSession ??
+                            restoreSessionLearning(
+                                memory,
+                                sessionTurnNumberRef.current,
+                            )),
+                        deferred: false,
+                        practiceAttempts: 0,
+                    },
                 };
                 setSessionByItem(sessionByItemRef.current);
             } else if (!isLocalTurn && currentSession) {
@@ -406,7 +411,9 @@ export default function Client({
             ) {
                 const active = Object.entries(sessions).filter(
                     ([id, state]) =>
-                        id !== item.id && state.phase !== "graduated",
+                        id !== item.id &&
+                        state.phase !== "graduated" &&
+                        !state.deferred,
                 );
                 if (active.length >= MAX_ACTIVE_LEARNING_ITEMS) {
                     active.sort(
