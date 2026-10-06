@@ -194,15 +194,53 @@ export const chooseBotItem = (
 ): string | null => {
     const protectedIds = new Set(state.cycleQueue.slice(0, BOT_LOOKAHEAD));
     for (const id of Object.keys(state.retries)) protectedIds.add(id);
+
+    // Prefer words the user has already answered, while still avoiding upcoming
+    // cycle/retry targets. This keeps BOT exposure from helping the next recall.
     const candidates = state.itemIds.filter(
         (id) => (state.userAnswered[id] ?? 0) > 0 && !protectedIds.has(id),
     );
     const varied = candidates.filter((id) => id !== state.lastBotItem);
     const pool = varied.length ? varied : candidates;
-    if (!pool.length) return null; // Skip a BOT turn rather than reveal an upcoming target.
-    const least = Math.min(...pool.map((id) => state.botShown[id] ?? 0));
-    const ties = pool.filter((id) => (state.botShown[id] ?? 0) === least);
-    return ties[Math.floor(random() * ties.length)];
+    if (pool.length) {
+        const least = Math.min(...pool.map((id) => state.botShown[id] ?? 0));
+        const ties = pool.filter((id) => (state.botShown[id] ?? 0) === least);
+        return ties[Math.floor(random() * ties.length)];
+    }
+
+    // Before the user has answered anything, keep the old behavior: skip the
+    // BOT turn rather than reveal a learning target at session start.
+    const hasUserHistory = Object.values(state.userAnswered).some(
+        (count) => count > 0,
+    );
+    if (!hasUserHistory) return null;
+
+    // If the strict pool is empty, keep the turn handoff alive by choosing a
+    // random non-protected word. It may be unseen, but it is outside the
+    // immediate lookahead/retry set.
+    const safeFallback = state.itemIds.filter(
+        (id) => !protectedIds.has(id) && id !== state.lastBotItem,
+    );
+    const safePool = safeFallback.length
+        ? safeFallback
+        : state.itemIds.filter((id) => !protectedIds.has(id));
+    if (safePool.length)
+        return safePool[Math.floor(random() * safePool.length)];
+
+    // Tiny rooms can have every word protected. In that case reuse a random
+    // word the user has already answered, so no new answer is revealed.
+    const answeredFallback = state.itemIds.filter(
+        (id) => (state.userAnswered[id] ?? 0) > 0,
+    );
+    const answeredVaried = answeredFallback.filter(
+        (id) => id !== state.lastBotItem,
+    );
+    const answeredPool = answeredVaried.length
+        ? answeredVaried
+        : answeredFallback;
+    return answeredPool.length
+        ? answeredPool[Math.floor(random() * answeredPool.length)]
+        : null;
 };
 export const recordBotPresentation = (
     state: SchedulerState,
