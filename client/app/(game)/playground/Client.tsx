@@ -38,10 +38,11 @@ export default function Client({
     const { bombRef, explode, resetExplosion, explosionLayer } =
         useBombExplosion();
 
-    const [displayName] = useState(() => {
-        if (typeof window === "undefined") return "あなた";
-        return localStorage.getItem("display-name") || "あなた";
-    });
+    const [displayName, setDisplayName] = useState("あなた");
+
+    useEffect(() => {
+        setDisplayName(localStorage.getItem("display-name") || "あなた");
+    }, []);
 
     const [users] = useState<User[]>(() => [
         { id: LOCAL_USER_ID, displayName },
@@ -295,6 +296,7 @@ export default function Client({
             onCreateRoom={() =>
                 router.push(process.env.NEXT_PUBLIC_SIGN_IN_URL!)
             }
+            enableRemoteTypingSync={false}
             resultExtraActions={
                 <Button
                     iconName="link"
