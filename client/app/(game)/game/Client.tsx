@@ -1,4 +1,5 @@
 "use client";
+import { getSignInUrl } from "@/lib/auth/sign-in-url";
 
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
@@ -586,7 +587,7 @@ export default function Clinet({
             }}
             onPlayAgain={handlePlayAgain}
             onCreateRoom={() =>
-                router.push(process.env.NEXT_PUBLIC_SIGN_IN_URL!)
+                router.push(getSignInUrl())
             }
             onJoin={() => handleJoin("join_button")}
             onWatch={handleWatch}
