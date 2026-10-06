@@ -45,6 +45,7 @@ const DEFAULT_TYPING_DELAY_MS = 220;
 const MIN_TYPING_DELAY_MS = 80;
 const MAX_TYPING_DELAY_MS = 600;
 const TYPING_SPEED_SMOOTHING = 0.3;
+const MIN_REVIEWS_BEFORE_LONG_TERM = 5;
 
 const clampTypingDelay = (delayMs: number) =>
     Math.min(
@@ -218,14 +219,24 @@ export default function Client({
             if (
                 isLocalTurn &&
                 !sessionByItemRef.current[item.id] &&
-                (!memory || memory.reviewCount === 0)
+                (!memory ||
+                    memory.reviewCount <
+                        MIN_REVIEWS_BEFORE_LONG_TERM)
             ) {
                 const nextSessionState: SessionLearningState = {
-                    phase: "encoding",
+                    phase:
+                        !memory || memory.reviewCount === 0
+                            ? "encoding"
+                            : "supported_recall",
                     freeRecallSuccesses: 0,
                     lastFreeRecallTurn: null,
                     lastSeenTurn: sessionTurnNumberRef.current,
-                    lastCueRatio: 1,
+                    lastCueRatio:
+                        !memory || memory.reviewCount === 0
+                            ? 1
+                            : memory.reviewCount === 1
+                              ? 0.5
+                              : 0.2,
                     relearningSinceLastFreeRecall: false,
                     cueSuccessStreak: 0,
                 };
