@@ -28,7 +28,14 @@ export class GameRoom extends DurableObject<WorkerEnv> {
 		}
 	}
 	private snapshot() {
-		if (this.game) this.broadcast('room:broadcast', this.game.room);
+		if (!this.game) return;
+		this.broadcast('room:broadcast', {
+			...this.game.room,
+			words: this.game.room.items.map((item) => ({
+				jp: item.prompt,
+				en: item.answer,
+			})),
+		});
 	}
 	private track(event: string, properties: Record<string, unknown> = {}) {
 		console.log(JSON.stringify({ event, roomId: this.game?.room.id, ...properties }));
