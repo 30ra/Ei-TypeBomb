@@ -307,12 +307,12 @@ export const chooseNextItem = ({
         const seenItems = items.filter(
             (item) => (memoryByItem[item.id]?.reviewCount ?? 0) > 0,
         );
+        if (seenItems.length === 0) return null;
+
         const botPool =
             seenItems.filter(notRecentlySeen).length > 0
                 ? seenItems.filter(notRecentlySeen)
-                : seenItems.length > 0
-                  ? seenItems
-                  : items;
+                : seenItems;
 
         return (
             [...botPool]
@@ -356,33 +356,22 @@ export const chooseNextItem = ({
         return dueSessionItems[0];
     }
 
-    const supportedSessionItems = items
-        .filter((item) => {
-            const state = sessionByItem[item.id];
-            return (
-                state &&
-                state.phase !== "graduated" &&
-                notRecentlySeen(item)
-            );
-        })
-        .sort((a, b) => {
-            const aState = sessionByItem[a.id];
-            const bState = sessionByItem[b.id];
-            return aState.lastSeenTurn - bState.lastSeenTurn;
-        });
-
-    if (supportedSessionItems.length > 0) {
-        return supportedSessionItems[0];
-    }
 
     const dueLongTermItems = items
         .filter((item) => {
             const session = sessionByItem[item.id];
             const memory = memoryByItem[item.id];
+            if (!memory) return false;
+
+            const graduatedThisSession =
+                session?.phase === "graduated";
+            const persistedLongTermCandidate =
+                !session &&
+                memory.reviewCount >= MIN_REVIEWS_BEFORE_LONG_TERM;
+
             if (
-                (session && session.phase !== "graduated") ||
-                !memory ||
-                memory.reviewCount < MIN_REVIEWS_BEFORE_LONG_TERM
+                !graduatedThisSession &&
+                !persistedLongTermCandidate
             ) {
                 return false;
             }
@@ -422,10 +411,20 @@ export const chooseNextItem = ({
 
     // Never stop play just because nothing is due. Reuse the best
     // available learned/active item as an early-extra review.
+    const nonActiveNotRecent = items.filter((item) => {
+        const session = sessionByItem[item.id];
+        return (
+            notRecentlySeen(item) &&
+            (!session || session.phase === "graduated")
+        );
+    });
+    const notRecent = items.filter(notRecentlySeen);
     const fallbackPool =
-        items.filter(notRecentlySeen).length > 0
-            ? items.filter(notRecentlySeen)
-            : items;
+        nonActiveNotRecent.length > 0
+            ? nonActiveNotRecent
+            : notRecent.length > 0
+              ? notRecent
+              : items;
 
     const lastSeenIndex = (itemId: string) =>
         recentItemIds.lastIndexOf(itemId);
