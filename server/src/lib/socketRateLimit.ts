@@ -24,7 +24,8 @@ export const createSocketRateLimit = (
         };
         bucket.tokens = Math.min(
             limit.capacity,
-            bucket.tokens + (Math.max(0, time - bucket.updatedAt) * limit.perSecond) / 1000,
+            bucket.tokens +
+                (Math.max(0, time - bucket.updatedAt) * limit.perSecond) / 1000,
         );
         bucket.updatedAt = time;
         buckets.set(event, bucket);

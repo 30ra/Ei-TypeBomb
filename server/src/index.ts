@@ -18,9 +18,19 @@ import {
     startConsole,
 } from "./lib/console";
 
-import { ClientError, requireRoomItems, validateAuthPayload, isRequestId } from "./shared/validation";
+import {
+    ClientError,
+    requireRoomItems,
+    validateAuthPayload,
+    isRequestId,
+} from "./shared/validation";
 import { canStart } from "./shared/game";
-import { roomSnapshot, type ClientPayloads, type ServerPayloads, type EventHandlers } from "./shared/protocol";
+import {
+    roomSnapshot,
+    type ClientPayloads,
+    type ServerPayloads,
+    type EventHandlers,
+} from "./shared/protocol";
 import { NodeGameAdapter, NODE_GAME_RULES } from "./lib/gameAdapter";
 
 const games = new Map<string, NodeGameAdapter>();
@@ -30,7 +40,10 @@ const pendingRoomLoads = new Map<string, Promise<Room | null>>();
 
 const app = express();
 const httpServer = createServer(app);
-const io = new Server<EventHandlers<ClientPayloads>, EventHandlers<ServerPayloads>>(httpServer, {
+const io = new Server<
+    EventHandlers<ClientPayloads>,
+    EventHandlers<ServerPayloads>
+>(httpServer, {
     cors: { origin: "*", methods: ["GET", "POST"] },
 });
 const acceptDatabaseProbe = createDatabaseProbeRateLimit();
@@ -73,35 +86,54 @@ const createRoomIfNeeded = (roomId: string): Promise<Room | null> => {
         };
 
         rooms.push(newRoom);
-        games.set(roomId, new NodeGameAdapter({ room: newRoom }, (result, previous) => {
-            const index = rooms.findIndex(item => item.id === roomId);
-            if (index === -1) return;
-            rooms[index] = result.state.room;
-            refreshServerState();
-            for (const effect of result.effects) {
-                if (effect.type === "broadcast") {
-                    const packet = effect.packet;
-                    // The protocol union pairs each event with its payload. Socket.IO
-                    // cannot infer that correlation through a variadic generic emit.
-                    const target = io.to(roomId);
-                    const emit = target.emit.bind(target) as (event: string, data?: unknown) => boolean;
-                    if (packet.data === undefined) emit(packet.event);
-                    else emit(packet.event, packet.data);
-                } else {
-                    const activity = effect.activity;
-                    logEvent("GAME", `${activity.event} ${roomId}`, {
-                        roomId, gameId: result.state.room.gameId ?? previous.room.gameId,
-                        playerCount: activity.playerCount, reason: activity.reason,
-                        previousHolder: previous.room.users[previous.room.bombHolder],
-                        nextHolder: result.state.room.users[result.state.room.bombHolder],
-                    });
-                    if (activity.event !== "word_passed") capturePostHogEvent(activity.event, {
-                        player_count: activity.playerCount,
-                        ...(activity.reason ? { reason: activity.reason } : {}),
-                    });
+        games.set(
+            roomId,
+            new NodeGameAdapter({ room: newRoom }, (result, previous) => {
+                if (result.state.room !== previous.room) {
+                    const index = rooms.findIndex((item) => item.id === roomId);
+                    if (index === -1) return;
+                    rooms[index] = result.state.room;
+                    refreshServerState();
                 }
-            }
-        }));
+                for (const effect of result.effects) {
+                    if (effect.type === "broadcast") {
+                        const packet = effect.packet;
+                        // The protocol union pairs each event with its payload. Socket.IO
+                        // cannot infer that correlation through a variadic generic emit.
+                        const target = io.to(roomId);
+                        const emit = target.emit.bind(target) as (
+                            event: string,
+                            data?: unknown,
+                        ) => boolean;
+                        if (packet.data === undefined) emit(packet.event);
+                        else emit(packet.event, packet.data);
+                    } else {
+                        const activity = effect.activity;
+                        logEvent("GAME", `${activity.event} ${roomId}`, {
+                            roomId,
+                            gameId:
+                                result.state.room.gameId ??
+                                previous.room.gameId,
+                            playerCount: activity.playerCount,
+                            reason: activity.reason,
+                            previousHolder:
+                                previous.room.users[previous.room.bombHolder],
+                            nextHolder:
+                                result.state.room.users[
+                                    result.state.room.bombHolder
+                                ],
+                        });
+                        if (activity.event !== "word_passed")
+                            capturePostHogEvent(activity.event, {
+                                player_count: activity.playerCount,
+                                ...(activity.reason
+                                    ? { reason: activity.reason }
+                                    : {}),
+                            });
+                    }
+                }
+            }),
+        );
         refreshServerState();
         logEvent("ROOM", `created ${roomId}`, { roomId });
         return newRoom;
@@ -138,7 +170,7 @@ io.on("connection", (socket) => {
 
     let user: User = { id: socket.id };
     let roomId: null | string = null;
-    const getGame = () => roomId ? games.get(roomId) : undefined;
+    const getGame = () => (roomId ? games.get(roomId) : undefined);
     logEvent("SERVER", "client connected", { socketId: socket.id });
     socket.emit("auth:request");
 
@@ -255,14 +287,31 @@ io.on("connection", (socket) => {
                 return;
             }
             // DB reads remain in the adapter. Recheck ownership and players after awaiting.
-            if (getGame() !== game || !canStart(game.state, user.id, NODE_GAME_RULES)) return;
-            game.apply({ type: "game:start", playerId: user.id, gameId: randomUUID(), gameDuration: savedRoom.gameDuration });
+            if (
+                getGame() !== game ||
+                !canStart(game.state, user.id, NODE_GAME_RULES)
+            )
+                return;
+            game.apply({
+                type: "game:start",
+                playerId: user.id,
+                gameId: randomUUID(),
+                gameDuration: savedRoom.gameDuration,
+            });
         } catch (error) {
-            reportError(error instanceof Error ? error.message : "ルームの設定を取得できませんでした。", error);
+            reportError(
+                error instanceof Error
+                    ? error.message
+                    : "ルームの設定を取得できませんでした。",
+                error,
+            );
         }
     });
 
-    const deleteUser = (playerId: string, reason: "disconnect" | "room_leave") => {
+    const deleteUser = (
+        playerId: string,
+        reason: "disconnect" | "room_leave",
+    ) => {
         if (!roomId) return;
         const game = getGame();
         if (!game) return;
@@ -272,11 +321,12 @@ io.on("connection", (socket) => {
         if (!socketRoom || socketRoom.size === 0) {
             game.dispose();
             games.delete(roomId);
-            rooms = rooms.filter(item => item.id !== roomId);
+            rooms = rooms.filter((item) => item.id !== roomId);
             refreshServerState();
             logEvent("ROOM", `deleted ${roomId}`, { roomId });
         } else {
-            if (game.state.room.isStart && game.state.room.users.length) io.to(roomId).emit("typing:input", { input: "" });
+            if (game.state.room.isStart && game.state.room.users.length)
+                io.to(roomId).emit("typing:input", { input: "" });
             sendRoomInfo(roomId);
         }
     };

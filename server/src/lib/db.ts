@@ -19,5 +19,8 @@ export const roomDatabase = new Pool({
 });
 
 roomDatabase.on("error", (error) => {
-    console.error("[DATABASE] Unexpected error on idle PostgreSQL client", error);
+    console.error(
+        "[DATABASE] Unexpected error on idle PostgreSQL client",
+        error,
+    );
 });

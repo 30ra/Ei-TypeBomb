@@ -27,7 +27,11 @@ const severity = {
 
 const toLogValue = (value: unknown): LogValue => {
     if (value === null) return null;
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    if (
+        typeof value === "string" ||
+        typeof value === "number" ||
+        typeof value === "boolean"
+    ) {
         return value;
     }
 

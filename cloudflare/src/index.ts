@@ -110,8 +110,7 @@ export class GameRoom extends DurableObject<WorkerEnv> {
 				}
 				ws.serializeAttachment(session);
 				const requestId = packet.data;
-				if (!isRequestId(requestId))
-					return;
+				if (!isRequestId(requestId)) return;
 				// Keep probes on the dedicated health Durable Object and use its
 				// persisted bucket across reconnects. Only this tiny storage update
 				// is serialized; the Supabase request itself stays outside the
@@ -148,8 +147,7 @@ export class GameRoom extends DurableObject<WorkerEnv> {
 				}
 				ws.serializeAttachment(session);
 				if (packet.event === 'health:ping') {
-					if (isRequestId(packet.data))
-						this.send(ws, 'health:pong', packet.data);
+					if (isRequestId(packet.data)) this.send(ws, 'health:pong', packet.data);
 					return;
 				}
 				if (packet.event === 'auth:response') {
@@ -194,7 +192,8 @@ export class GameRoom extends DurableObject<WorkerEnv> {
 						this.apply({ type: 'game:start', playerId: session.id, gameId: crypto.randomUUID(), gameDuration: saved.gameDuration });
 						break;
 					}
-					default: return;
+					default:
+						return;
 				}
 				await this.save();
 				this.snapshot();
@@ -220,11 +219,11 @@ export class GameRoom extends DurableObject<WorkerEnv> {
 			if (effect.type === 'broadcast') {
 				// One final snapshot follows save(), including alarm-driven idle removals.
 				if (effect.packet.event !== 'room:broadcast') this.broadcast(effect.packet.event, effect.packet.data);
-			}
-			else if (effect.activity.event !== 'word_passed') this.track(effect.activity.event, {
-				player_count: effect.activity.playerCount,
-				...(effect.activity.reason ? { reason: effect.activity.reason } : {}),
-			});
+			} else if (effect.activity.event !== 'word_passed')
+				this.track(effect.activity.event, {
+					player_count: effect.activity.playerCount,
+					...(effect.activity.reason ? { reason: effect.activity.reason } : {}),
+				});
 		}
 	}
 	private leave(session: Session, reason: 'room_leave' | 'disconnect') {

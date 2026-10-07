@@ -13,9 +13,7 @@ export const probeRoomDatabase = async (database: Pool): Promise<void> => {
         await client.query(
             `SET LOCAL statement_timeout = ${DATABASE_HEALTH_TIMEOUT_MS}`,
         );
-        await client.query(
-            "SELECT id FROM public.ei_typebomb_rooms LIMIT 1",
-        );
+        await client.query("SELECT id FROM public.ei_typebomb_rooms LIMIT 1");
     } finally {
         // End the transaction before returning the connection so the local
         // timeout and any aborted-transaction state cannot leak to its next user.

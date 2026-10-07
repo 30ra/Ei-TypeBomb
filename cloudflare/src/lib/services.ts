@@ -47,11 +47,7 @@ export async function checkDatabase(env: Secrets): Promise<number> {
 		auth: { autoRefreshToken: false, persistSession: false },
 	});
 	const startedAt = performance.now();
-	const { error } = await db
-		.from('ei_typebomb_rooms')
-		.select('id')
-		.limit(1)
-		.abortSignal(AbortSignal.timeout(10_000));
+	const { error } = await db.from('ei_typebomb_rooms').select('id').limit(1).abortSignal(AbortSignal.timeout(10_000));
 	if (error) throw new Error(`Database health check failed: ${error.code}`);
 	return Math.round(performance.now() - startedAt);
 }

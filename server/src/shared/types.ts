@@ -1,4 +1,9 @@
-export type TypedRecallItem = { id: string; type: 'typed_recall'; prompt: string; answer: string };
+export type TypedRecallItem = {
+    id: string;
+    type: "typed_recall";
+    prompt: string;
+    answer: string;
+};
 export type Item = TypedRecallItem;
 export type User = { id: string; displayName?: string; pulse?: string };
 export type Room = {

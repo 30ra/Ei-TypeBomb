@@ -10,7 +10,6 @@ test("database probe limits survive reconnects from the same address", () => {
     assert.equal(accept("192.0.2.1"), true);
     assert.equal(accept("192.0.2.1"), false);
 
-    // A different socket using the same address shares the exhausted bucket.
     assert.equal(accept("192.0.2.1"), false);
     assert.equal(accept("192.0.2.2"), true);
 

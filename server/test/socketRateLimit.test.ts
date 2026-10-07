@@ -11,7 +11,9 @@ const harness = () => {
     let time = 0;
     const middleware = createSocketRateLimit(() => time);
     return {
-        advance: (ms: number) => { time += ms; },
+        advance: (ms: number) => {
+            time += ms;
+        },
         accept: (event: string) => {
             let accepted = false;
             middleware([event], (error) => {
@@ -84,52 +86,77 @@ test("budgets are independent across events and connections", () => {
         assert.equal(h.accept(event), true);
 });
 
-test("Socket.IO drops excess broadcasts without blocking other events or disconnect cleanup", { timeout: 5000 }, async (t) => {
-    const http = createServer();
-    const server = new Server(http);
-    t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
-    let time = 0;
-    const disconnects: string[] = [];
-    server.on("connection", (socket) => {
-        socket.use(createSocketRateLimit(() => time));
-        socket.join("test");
-        socket.on("currentInput", (input) => server.to("test").emit("typing:input", input));
-        socket.on("word:success", (ack) => ack());
-        socket.on("disconnect", () => disconnects.push(socket.id));
-    });
-    http.listen(0, "127.0.0.1");
-    await once(http, "listening");
-    const url = `http://127.0.0.1:${(http.address() as AddressInfo).port}`;
-    const sender = connect(url, { transports: ["websocket"], forceNew: true });
-    const observer = connect(url, { transports: ["websocket"], forceNew: true });
-    t.after(() => { sender.disconnect(); observer.disconnect(); });
-    await Promise.all([sender, observer].map(client =>
-        new Promise<void>(resolve => client.once("connect", () => resolve()))));
-    const received: string[] = [];
-    sender.on("typing:input", (input) => received.push(input));
-    let observerCount = 0;
-    observer.on("typing:input", () => observerCount++);
-    const errors: unknown[] = [];
-    sender.on("error", (error) => errors.push(error));
-    for (let i = 0; i < 1000; i++) sender.emit("currentInput", String(i));
-    // ACK is an ordered barrier after all sender packets and its broadcasts.
-    await sender.timeout(1000).emitWithAck("word:success");
-    assert.equal(received.length, 60);
-    assert.equal(sender.connected, true);
-    assert.deepEqual(errors, []);
-    const independent = new Promise<void>(resolve => sender.once("typing:input", () => resolve()));
-    observer.emit("currentInput", "independent");
-    await independent;
-    assert.equal(received.at(-1), "independent");
-    time = 1000;
-    sender.emit("currentInput", "recovered");
-    await sender.timeout(1000).emitWithAck("word:success");
-    assert.equal(received.at(-1), "recovered");
-    await observer.timeout(1000).emitWithAck("word:success");
-    assert.equal(observerCount, 62);
-    const socket = server.sockets.sockets.get(sender.id!)!;
-    const disconnected = once(socket, "disconnect");
-    sender.disconnect();
-    await disconnected;
-    assert.ok(disconnects.includes(socket.id));
-});
+test(
+    "Socket.IO drops excess broadcasts without blocking other events or disconnect cleanup",
+    { timeout: 5000 },
+    async (t) => {
+        const http = createServer();
+        const server = new Server(http);
+        t.after(
+            () => new Promise<void>((resolve) => server.close(() => resolve())),
+        );
+        let time = 0;
+        const disconnects: string[] = [];
+        server.on("connection", (socket) => {
+            socket.use(createSocketRateLimit(() => time));
+            socket.join("test");
+            socket.on("currentInput", (input) =>
+                server.to("test").emit("typing:input", input),
+            );
+            socket.on("word:success", (ack) => ack());
+            socket.on("disconnect", () => disconnects.push(socket.id));
+        });
+        http.listen(0, "127.0.0.1");
+        await once(http, "listening");
+        const url = `http://127.0.0.1:${(http.address() as AddressInfo).port}`;
+        const sender = connect(url, {
+            transports: ["websocket"],
+            forceNew: true,
+        });
+        const observer = connect(url, {
+            transports: ["websocket"],
+            forceNew: true,
+        });
+        t.after(() => {
+            sender.disconnect();
+            observer.disconnect();
+        });
+        await Promise.all(
+            [sender, observer].map(
+                (client) =>
+                    new Promise<void>((resolve) =>
+                        client.once("connect", () => resolve()),
+                    ),
+            ),
+        );
+        const received: string[] = [];
+        sender.on("typing:input", (input) => received.push(input));
+        let observerCount = 0;
+        observer.on("typing:input", () => observerCount++);
+        const errors: unknown[] = [];
+        sender.on("error", (error) => errors.push(error));
+        for (let i = 0; i < 1000; i++) sender.emit("currentInput", String(i));
+        // ACK is an ordered barrier after all sender packets and its broadcasts.
+        await sender.timeout(1000).emitWithAck("word:success");
+        assert.equal(received.length, 60);
+        assert.equal(sender.connected, true);
+        assert.deepEqual(errors, []);
+        const independent = new Promise<void>((resolve) =>
+            sender.once("typing:input", () => resolve()),
+        );
+        observer.emit("currentInput", "independent");
+        await independent;
+        assert.equal(received.at(-1), "independent");
+        time = 1000;
+        sender.emit("currentInput", "recovered");
+        await sender.timeout(1000).emitWithAck("word:success");
+        assert.equal(received.at(-1), "recovered");
+        await observer.timeout(1000).emitWithAck("word:success");
+        assert.equal(observerCount, 62);
+        const socket = server.sockets.sockets.get(sender.id!)!;
+        const disconnected = once(socket, "disconnect");
+        sender.disconnect();
+        await disconnected;
+        assert.ok(disconnects.includes(socket.id));
+    },
+);

@@ -2,7 +2,8 @@ import { performance } from "node:perf_hooks";
 
 import { EVENT_RATE_LIMITS } from "../shared/rateLimits";
 
-const { capacity: CAPACITY, perSecond: TOKENS_PER_SECOND } = EVENT_RATE_LIMITS["health:database"];
+const { capacity: CAPACITY, perSecond: TOKENS_PER_SECOND } =
+    EVENT_RATE_LIMITS["health:database"];
 const STALE_AFTER_MS = 60_000;
 
 type Bucket = { tokens: number; updatedAt: number };
@@ -36,7 +37,8 @@ export const createDatabaseProbeRateLimit = (
         // cannot make the process-wide limiter grow forever.
         if (buckets.size > 1_000) {
             for (const [address, candidate] of buckets) {
-                if (time - candidate.updatedAt > STALE_AFTER_MS) buckets.delete(address);
+                if (time - candidate.updatedAt > STALE_AFTER_MS)
+                    buckets.delete(address);
             }
             while (buckets.size > 1_000) {
                 const oldestAddress = buckets.keys().next().value;
