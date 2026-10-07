@@ -135,7 +135,11 @@ const latencyColor = (latencyMs: number) => {
 };
 
 const renderLatency = () => {
-    const latest = latencySamples.at(-1)?.value;
+    const now = Date.now();
+    const freshSamples = latencySamples.filter(
+        (sample) => now - sample.at <= 60_000,
+    );
+    const latest = freshSamples.at(-1)?.value;
     if (latest === undefined) {
         return [
             `${colorize("Latency", ansi.slate500)}   ${colorize(
@@ -152,7 +156,7 @@ const renderLatency = () => {
         colorize("█".repeat(width - filled), ansi.slate300);
 
     const sparkChars = "▁▂▃▄▅▆▇█";
-    const spark = latencySamples
+    const spark = freshSamples
         .slice(-30)
         .map((sample) => {
             const level = Math.min(
@@ -399,7 +403,11 @@ export const logError = (
     });
 
     const roomId = metadata?.roomId;
-    if (typeof roomId === "string" && roomId.length > 0) {
+    if (
+        isInteractive &&
+        typeof roomId === "string" &&
+        roomId.length > 0
+    ) {
         roomIssues.set(roomId, Date.now() + 60_000);
     }
 
