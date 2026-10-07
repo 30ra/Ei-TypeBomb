@@ -545,26 +545,6 @@ function TypingAttempt({
                         if (!isReadonly) inputRef.current?.focus();
                     }}
                     onKeyDown={(e) => {
-                        const isSpace = e.key === " " || e.code === "Space";
-                        if (manualHints && isSpace) {
-                            if (e.repeat) {
-                                e.preventDefault();
-                                return;
-                            }
-                            if (lastKeyWasSpaceRef.current) {
-                                e.preventDefault();
-                                requestHint();
-                                return;
-                            }
-                            lastKeyWasSpaceRef.current = true;
-                            if (english[currentSelection] !== " ") {
-                                e.preventDefault();
-                            }
-                            return;
-                        }
-                        if (!isSpace) {
-                            lastKeyWasSpaceRef.current = false;
-                        }
                         if (e.key === "ArrowLeft") {
                             e.preventDefault();
                             setCurrentSelection(
@@ -659,6 +639,18 @@ function TypingAttempt({
                                 const value = e.target.value;
                                 if (!value) return;
                                 const char = value.slice(-1);
+                                if (manualHints) {
+                                    if (char === " ") {
+                                        if (lastKeyWasSpaceRef.current) {
+                                            setCharInput("");
+                                            requestHint();
+                                            return;
+                                        }
+                                        lastKeyWasSpaceRef.current = true;
+                                    } else {
+                                        lastKeyWasSpaceRef.current = false;
+                                    }
+                                }
                                 if (firstKeyAtRef.current === null) {
                                     firstKeyAtRef.current = performance.now();
                                 }
