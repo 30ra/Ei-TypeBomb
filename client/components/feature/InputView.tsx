@@ -315,36 +315,6 @@ function TypingAttempt({
         setAnswerRevealed(true);
     };
 
-    const confirmAnswer = () => {
-        if (!english || !answerRevealed || completedRef.current) return;
-        completedRef.current = true;
-        onRecallComplete?.({
-            success: false,
-            outcome: "relearned",
-            answerLength: english.length,
-            firstAttemptCorrect: false,
-            answerWasFullyRevealed: true,
-            initialCueRatio,
-            finalCueRatio: 1,
-            additionalHintCount: hintCount,
-            hintCount,
-            revealedHintChars: english.length,
-            assistedPositions: [],
-            hintEvents: [...hintEventsRef.current],
-            attemptCount: attemptCountRef.current,
-            incorrectInputCount: incorrectInputCountRef.current,
-            maxCorrectPrefixLength: maxCorrectPrefixRef.current,
-            recallLatencyMs:
-                firstKeyAtRef.current === null
-                    ? null
-                    : firstKeyAtRef.current - recallStartedAtRef.current,
-            elapsedMs: Math.max(
-                0,
-                performance.now() - recallStartedAtRef.current,
-            ),
-        });
-        onSuccess();
-    };
 
     useEffect(() => {
         if (isReadonly || !english) return;
@@ -386,7 +356,7 @@ function TypingAttempt({
     if (!english) return null;
 
     const moveToNext = (next: string[]) => {
-        if (completedRef.current || answerRevealed) return;
+        if (completedRef.current) return;
         // Record the incorrect character when entered, before Backspace/reset can erase it.
         if (next[currentSelection] !== english[currentSelection])
             incorrectInputCountRef.current += 1;
@@ -512,27 +482,6 @@ function TypingAttempt({
                     {japanese}
                 </div>
             </div>
-            {manualHints && answerRevealed && (
-                <div className="flex flex-col items-center gap-2">
-                        <div
-                            className="rounded-lg border border-(--color-border) p-4 text-center"
-                            role="status"
-                        >
-                            <p className="text-xl font-bold">{english}</p>
-                            <p>{japanese}</p>
-                            <p className="text-sm">
-                                答えを確認しました。あとでもう一度練習します。
-                            </p>
-                            <button
-                                type="button"
-                                className="mt-3 rounded border px-3 py-2 focus-visible:outline-2"
-                                onClick={confirmAnswer}
-                            >
-                                確認して次へ
-                            </button>
-                        </div>
-                 </div>
-            )}
             <div className="w-full flex justify-center">
                 <div
                     ref={inputFrameRef}
@@ -616,11 +565,7 @@ function TypingAttempt({
                                     ? answerRevealed
                                     : index < hintLength) && (
                                     <div
-                                        className={
-                                            manualHints
-                                                ? "absolute top-0 inset-x-0 pointer-events-none text-sm text-blue-600 dark:text-blue-300 text-center"
-                                                : "absolute inset-1 pointer-events-none opacity-25 border-b border-(--color-border) flex items-center justify-center"
-                                        }
+                                        className="absolute inset-1 pointer-events-none opacity-25 border-b border-(--color-border) flex items-center justify-center"
                                     >
                                         {char}
                                     </div>
@@ -631,7 +576,7 @@ function TypingAttempt({
                             </button>
                         );
                     })}
-                    {!isReadonly && !answerRevealed && (
+                    {!isReadonly && (
                         <input
                             ref={inputRef}
                             value={charInput}
