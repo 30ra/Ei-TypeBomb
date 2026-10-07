@@ -6,7 +6,7 @@ import {
     probeRoomDatabase,
 } from "../src/lib/databaseHealth";
 
-const result: QueryResult = { rows: [], rowCount: 0 };
+const result: QueryResult<never> = { rows: [], rowCount: 0 };
 
 const createDatabase = (failSelect = false) => {
     const queries: string[] = [];

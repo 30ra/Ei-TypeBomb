@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyGameEvent, nextGameDeadline, type GameContext, type GameEvent } from '../game';
-import type { GameState } from '../types';
-import { NODE_GAME_RULES } from '../../server/src/lib/gameAdapter';
-import { WORKER_GAME_RULES } from '../../cloudflare/src/lib/gameRules';
-import { roomSnapshot } from '../protocol';
-import { parseClientEvent, validateDisplayName, requireRoomItems } from '../validation';
+import { applyGameEvent, nextGameDeadline, type GameContext, type GameEvent } from '../src/shared/game';
+import type { GameState } from '../src/shared/types';
+import { NODE_GAME_RULES } from '../src/lib/gameAdapter';
+import { roomSnapshot } from '../src/shared/protocol';
+import { parseClientEvent, validateDisplayName, requireRoomItems } from '../src/shared/validation';
+
+// Exercise the strict policy without importing files outside the server project.
+const STRICT_GAME_RULES: GameContext['rules'] = { allowSpectatorStart: false, allowCountdownPass: false, clearInputOnStop: true };
 
 const fresh = (): GameState => ({ room: {
     id: 'room', maxPlayers: 2, gameDuration: 20,
@@ -13,7 +15,7 @@ const fresh = (): GameState => ({ room: {
     users: [], isStart: false, bombHolder: 0, bombStatus: 0,
 } });
 const start: GameEvent = { type: 'game:start', playerId: 'a', gameId: 'game', gameDuration: 20 };
-for (const [runtime, rules] of [['node', NODE_GAME_RULES], ['worker', WORKER_GAME_RULES]] as const) {
+for (const [runtime, rules] of [['node', NODE_GAME_RULES], ['worker', STRICT_GAME_RULES]] as const) {
     const context: GameContext = { now: 1000, random: () => 0, rules };
     const apply = (state: GameState, event: GameEvent, overrides: Partial<GameContext> = {}) => applyGameEvent(state, event, { ...context, ...overrides });
     const joined = () => ['a', 'b'].reduce((state, id) => apply(state, { type: 'room:join', player: { id, displayName: id } }).state, fresh());
@@ -109,12 +111,12 @@ function assertReset(state: GameState) {
 test('preserves existing runtime differences explicitly', () => {
     const state = fresh();
     state.room.users = [{ id: 'a' }, { id: 'b' }];
-    for (const rules of [NODE_GAME_RULES, WORKER_GAME_RULES]) {
+    for (const rules of [NODE_GAME_RULES, STRICT_GAME_RULES]) {
         const context = { now: 0, random: () => 0, rules };
         const spectator = applyGameEvent(state, { ...start, playerId: 'observer' }, context);
         assert.equal(spectator.state.room.isStart, rules.allowSpectatorStart);
-        const started = applyGameEvent(state, start, context).state;
-        const passed = applyGameEvent(started, { type: 'word:success', playerId: 'a' }, context).state;
+        const started: GameState = applyGameEvent(state, start, context).state;
+        const passed: GameState = applyGameEvent(started, { type: 'word:success', playerId: 'a' }, context).state;
         assert.equal(passed.room.bombHolder, rules.allowCountdownPass ? 1 : 0);
     }
 });

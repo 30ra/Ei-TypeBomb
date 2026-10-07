@@ -315,13 +315,13 @@ it('Node and Durable Object adapters produce identical states for the same game 
 	const stub = env.GAME_ROOMS.getByName(roomId);
 	type AdapterView = {
 		game: GameState;
-		apply(event: import('../../shared/game').GameEvent, now: number): void;
+		apply(event: import('../../server/src/shared/game').GameEvent, now: number): void;
 		save(): Promise<void>;
 	};
 	await runInDurableObject(stub, instance => {
 		(instance as unknown as AdapterView).game = structuredClone(initial);
 	});
-	async function both(event: import('../../shared/game').GameEvent) {
+	async function both(event: import('../../server/src/shared/game').GameEvent) {
 		node.apply(event);
 		const stored = await runInDurableObject(stub, async (instance, ctx) => {
 			const worker = instance as unknown as AdapterView;

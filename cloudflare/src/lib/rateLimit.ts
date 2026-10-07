@@ -1,5 +1,5 @@
 import type { Session } from '../types';
-import { eventRateLimit } from '../../../shared/rateLimits';
+import { eventRateLimit } from '../../../server/src/shared/rateLimits';
 export function acceptEvent(session: Session, event: string, now = Date.now()): boolean {
 	const limit = eventRateLimit(event);
 	if (!limit) return false;

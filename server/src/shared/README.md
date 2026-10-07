@@ -1,5 +1,9 @@
 # Shared game core
 
+The common source lives at `server/src/shared/` so the Node server can be
+built and deployed from the `server/` directory alone. Worker imports target
+this same source at bundle time.
+
 `types.ts` defines serializable `Room` / `GameState` and opaque player IDs.
 `protocol.ts` defines both directions of the existing protocol, Socket.IO handler
 types, and the public room snapshot (including legacy `words`, excluding passwords).
@@ -60,15 +64,17 @@ does not implement failover or cross-server synchronization.
 
 - `cd server && npm test`: shared unit tests, Node timer tests and existing tests.
 - `cd server && npm run build`: compiles Node and its imported shared sources.
-  A generated `server/dist/index.js` entry loads `dist/server/src/index.js`, with
-  shared code at `server/dist/shared/`. The existing compiled entry path and
+  TypeScript emits `server/dist/index.js` and `server/dist/shared/` directly.
   `npm start` / `npm run dev` keep working.
   Deploy the complete `dist` directory when using compiled JavaScript.
+- `cd server && npm run typecheck`: checks both source and Node tests. The tests
+  have a dedicated `test/tsconfig.json` using the server's `@types/node`.
 - `cd cloudflare && npm test`: Worker integration tests, including a scenario that
   applies the same events through the real GameRoom adapter and NodeGameAdapter
   and compares persisted states after every event.
 - `cd cloudflare && npm run typecheck && npm run build`: typecheck and Wrangler
   dry-run bundle (no deployment). Wrangler bundles imported shared sources.
 
-Keep the repository's `shared/` directory beside `server/` and `cloudflare/` when
-running or building from source; shared code adds no dependencies or install step.
+Node source, tests and build configuration only reference files inside `server/`.
+For Worker builds, retain `server/src/shared/` beside `cloudflare/` in the repository;
+shared code adds no dependencies or install step.

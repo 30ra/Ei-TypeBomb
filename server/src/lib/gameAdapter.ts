@@ -1,5 +1,5 @@
-import { applyGameEvent, nextGameDeadline, type GameRules, type GameEvent, type GameResult } from '../../../shared/game';
-import type { GameState } from '../../../shared/types';
+import { applyGameEvent, nextGameDeadline, type GameRules, type GameEvent, type GameResult } from '../shared/game';
+import type { GameState } from '../shared/types';
 
 export const NODE_GAME_RULES: GameRules = { allowSpectatorStart: true, allowCountdownPass: true, clearInputOnStop: false };
 

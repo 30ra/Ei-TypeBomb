@@ -18,9 +18,9 @@ import {
     startConsole,
 } from "./lib/console";
 
-import { ClientError, requireRoomItems, validateAuthPayload, isRequestId } from "../../shared/validation";
-import { canStart } from "../../shared/game";
-import { roomSnapshot, type ClientPayloads, type ServerPayloads, type EventHandlers } from "../../shared/protocol";
+import { ClientError, requireRoomItems, validateAuthPayload, isRequestId } from "./shared/validation";
+import { canStart } from "./shared/game";
+import { roomSnapshot, type ClientPayloads, type ServerPayloads, type EventHandlers } from "./shared/protocol";
 import { NodeGameAdapter, NODE_GAME_RULES } from "./lib/gameAdapter";
 
 const games = new Map<string, NodeGameAdapter>();

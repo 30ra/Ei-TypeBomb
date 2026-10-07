@@ -103,7 +103,8 @@ test("Socket.IO drops excess broadcasts without blocking other events or disconn
     const sender = connect(url, { transports: ["websocket"], forceNew: true });
     const observer = connect(url, { transports: ["websocket"], forceNew: true });
     t.after(() => { sender.disconnect(); observer.disconnect(); });
-    await Promise.all([once(sender, "connect"), once(observer, "connect")]);
+    await Promise.all([sender, observer].map(client =>
+        new Promise<void>(resolve => client.once("connect", () => resolve()))));
     const received: string[] = [];
     sender.on("typing:input", (input) => received.push(input));
     let observerCount = 0;
@@ -116,7 +117,7 @@ test("Socket.IO drops excess broadcasts without blocking other events or disconn
     assert.equal(received.length, 60);
     assert.equal(sender.connected, true);
     assert.deepEqual(errors, []);
-    const independent = once(sender, "typing:input");
+    const independent = new Promise<void>(resolve => sender.once("typing:input", () => resolve()));
     observer.emit("currentInput", "independent");
     await independent;
     assert.equal(received.at(-1), "independent");

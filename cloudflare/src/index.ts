@@ -3,10 +3,10 @@ import type { GameState, Session, WorkerEnv } from './types';
 import { capture, checkDatabase, ClientError, getRoom, verifyToken } from './lib/services';
 import { acceptEvent } from './lib/rateLimit';
 import { WORKER_GAME_RULES } from './lib/gameRules';
-import { applyGameEvent, canStart, nextGameDeadline, type GameEvent, type GameEffect } from '../../shared/game';
-import { roomSnapshot, type ServerPayloads } from '../../shared/protocol';
-import { isRequestId, parseClientEvent, validateAuthPayload } from '../../shared/validation';
-import { EVENT_RATE_LIMITS } from '../../shared/rateLimits';
+import { applyGameEvent, canStart, nextGameDeadline, type GameEvent, type GameEffect } from '../../server/src/shared/game';
+import { roomSnapshot, type ServerPayloads } from '../../server/src/shared/protocol';
+import { isRequestId, parseClientEvent, validateAuthPayload } from '../../server/src/shared/validation';
+import { EVENT_RATE_LIMITS } from '../../server/src/shared/rateLimits';
 
 const IDLE_TIMEOUT = 75_000;
 const AUTH_TIMEOUT = 20_000;
