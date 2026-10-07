@@ -846,6 +846,25 @@ test("full manual hint reuses the inline overlay and keeps typing enabled", () =
     );
 });
 
+test("full hint clears existing incorrect input and resets on later wrong typing", () => {
+    const source = fs.readFileSync(
+        path.join(root, "components/feature/InputView.tsx"),
+        "utf8",
+    );
+    assert.match(
+        source,
+        /const hasIncorrectInput = input\.some\(/,
+    );
+    assert.match(
+        source,
+        /if \(hasIncorrectInput\) \{\s*resetInput\(\);\s*\}/,
+    );
+    assert.match(
+        source,
+        /typedInsideHint &&\s*\(!manualHints \|\| answerRevealed\)/,
+    );
+});
+
 test("actual manual hint callback reveals the full answer and records one answer event", () => {
     const typed = ["r", "e", "c", "i", "e", "v", "e"];
     const events = { current: [] };
