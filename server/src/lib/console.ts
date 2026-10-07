@@ -298,14 +298,14 @@ const formatState = () => {
         "",
         colorize(
             `ROOMS ${"─".repeat(Math.min(process.stdout.columns ?? 67, 67))}`,
-            ansi.slate500,
+            ansi.slate300,
         ),
         "",
         renderRooms(),
         "",
         colorize(
             `ACTIVITY ${"─".repeat(Math.min(process.stdout.columns ?? 64, 64))}`,
-            ansi.slate500,
+            ansi.slate300,
         ),
         "",
         renderActivity(),
