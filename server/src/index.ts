@@ -323,6 +323,7 @@ io.on("connection", (socket) => {
         const nextHolder = room.users[room.bombHolder];
         if (room.items?.length)
             room.wordIndex = Math.floor(Math.random() * room.items.length);
+        refreshServerState();
         logEvent("GAME", `word passed in ${roomId}`, {
             roomId,
             gameId: room.gameId,
