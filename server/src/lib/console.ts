@@ -78,18 +78,18 @@ const eventSymbol = (context: EventContext) => {
 
 const logo = () => {
     const etb = [
-        "███████  ███████  ██████  ",
-        "██          ██     ██   ██ ",
-        "██████      ██     ██████  ",
-        "██          ██     ██   ██ ",
-        "███████     ██     ██████  ",
+        "███████  ████████  ██████   ",
+        "██          ██     ██    ██ ",
+        "██████      ██     ██████   ",
+        "██          ██     ██    ██ ",
+        "███████     ██     ██████   ",
     ];
     const consoleWord = [
-        " ███  ███  █   █ ████  ███  █    █████",
-        "█    █   █ ██  █ █    █   █ █    █    ",
-        "█    █   █ █ █ █ ████ █   █ █    ████ ",
-        "█    █   █ █  ██    █ █   █ █    █    ",
-        " ███  ███  █   █ ████  ███  ████ █████",
+        " ██████    ███████    ███    ██    ███████    ███████    ██       ███████",
+        "██        ██     ██   ████   ██   ██         ██     ██   ██       ██",
+        "██        ██     ██   ██ ██  ██    ███████   ██     ██   ██       █████",
+        "██        ██     ██   ██  ██ ██          ██  ██     ██   ██       ██",
+        " ██████    ███████    ██   ████    ███████    ███████    ███████  ███████",
     ];
 
     return etb
@@ -97,7 +97,7 @@ const logo = () => {
             (line, index) =>
                 `${colorize(line, ansi.cyan600)}   ${colorize(
                     consoleWord[index],
-                    ansi.slate300,
+                    ansi.slate500,
                 )}`,
         )
         .join("\n");
@@ -117,9 +117,9 @@ const pulseIndicator = () => {
     }
 
     const frames = [ansi.sage400, ansi.sage500, ansi.sage600, ansi.sage700];
-    const phase = Math.floor(Date.now() / 240) % 6;
+    const phase = Math.floor(Date.now() / 60) % 6;
     const frameIndex = phase <= 3 ? phase : 6 - phase;
-    return `${colorize("█", frames[frameIndex])} ${colorize(
+    return `${colorize("██", frames[frameIndex])}   ${colorize(
         `${ansi.bold}Used`,
         ansi.sage600,
     )}`;
@@ -138,14 +138,10 @@ const renderLatency = () => {
     const latest = latencySamples.at(-1)?.value;
     if (latest === undefined) {
         return [
-            `LATENCY   ${colorize(
+            `${colorize("Latency", ansi.slate500)}   ${colorize(
                 "█".repeat(24),
-                ansi.slate300,
-            )}   ${colorize("— ms", ansi.slate500)}`,
-            `          ${colorize(
-                "waiting for connection samples",
                 ansi.slate500,
-            )}`,
+            )}   ${colorize("— ms", ansi.slate500)}`,
         ].join("\n");
     }
 
@@ -196,12 +192,11 @@ const renderRoomCard = (room: ConsoleRoom) => {
     const top = border(`╭${"─".repeat(ROOM_INNER_WIDTH)}╮`);
     const bottom = border(`╰${"─".repeat(ROOM_INNER_WIDTH)}╯`);
 
-    const roomLabel = room.id.length > 18 ? `${room.id.slice(0, 17)}…` : room.id;
+    const roomLabel =
+        room.id.length > 18 ? `${room.id.slice(0, 17)}…` : room.id;
     const title = ` ${roomLabel}`;
     const titleLine =
-        border("│") +
-        padVisible(title, ROOM_INNER_WIDTH) +
-        border("│");
+        border("│") + padVisible(title, ROOM_INNER_WIDTH) + border("│");
 
     const rows = Array.from({ length: 4 }, () =>
         Array.from({ length: ROOM_INNER_WIDTH }, () => " "),
@@ -226,7 +221,7 @@ const renderRoomCard = (room: ConsoleRoom) => {
         room.players.length === 0
             ? "empty"
             : room.isStart
-              ? `${room.players.length} players · playing`
+              ? `${room.players.length} players Playing`
               : `${room.players.length} players`;
     const statusLine =
         border("│") +
@@ -256,7 +251,9 @@ const renderRooms = () => {
     for (let index = 0; index < cards.length; index += perRow) {
         const rowCards = cards.slice(index, index + perRow);
         for (let line = 0; line < rowCards[0].length; line += 1) {
-            lines.push(rowCards.map((card) => card[line]).join(" ".repeat(gap)));
+            lines.push(
+                rowCards.map((card) => card[line]).join(" ".repeat(gap)),
+            );
         }
         if (index + perRow < cards.length) lines.push("");
     }
@@ -293,19 +290,23 @@ const formatState = () => {
         logo(),
         "",
         `${pulseIndicator()}    ${colorize(
-            `${players} player${players === 1 ? "" : "s"} · ${state.rooms.length} room${state.rooms.length === 1 ? "" : "s"} · ${activeGames} game${activeGames === 1 ? "" : "s"}`,
+            `${players} player${players === 1 ? "" : "s"}   ${state.rooms.length} room${state.rooms.length === 1 ? "" : "s"}   ${activeGames} game${activeGames === 1 ? "" : "s"}`,
             ansi.slate500,
         )}`,
         "",
         renderLatency(),
         "",
-        colorize("─".repeat(Math.min(process.stdout.columns ?? 72, 72)), ansi.slate700),
-        colorize("ROOMS", ansi.slate300),
+        colorize(
+            `ROOMS ${"─".repeat(Math.min(process.stdout.columns ?? 67, 67))}`,
+            ansi.slate500,
+        ),
         "",
         renderRooms(),
         "",
-        colorize("─".repeat(Math.min(process.stdout.columns ?? 72, 72)), ansi.slate700),
-        colorize("ACTIVITY", ansi.slate300),
+        colorize(
+            `ACTIVITY ${"─".repeat(Math.min(process.stdout.columns ?? 64, 64))}`,
+            ansi.slate500,
+        ),
         "",
         renderActivity(),
     ].join("\n");
