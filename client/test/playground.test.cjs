@@ -699,6 +699,8 @@ test("actual input callbacks retain a wrong character through Backspace correcti
         incorrectInputCountRef: ref(0),
         maxCorrectPrefixRef: ref(0),
         lastCorrectProgressAtRef: ref(0),
+        lastKeyWasSpaceRef: ref(false),
+        requestHint: noop,
         firstKeyAtRef: ref(100),
         recallStartedAtRef: ref(0),
         inputFrameRef: ref(null),
@@ -818,49 +820,33 @@ function getInputFunction(name, globals) {
     ).callback;
 }
 
-test("actual manual hint callback preserves input and records only newly supplied positions", () => {
+test("actual manual hint callback reveals the full answer and records one answer event", () => {
     const typed = ["r", "e", "c", "i", "e", "v", "e"];
     const events = { current: [] };
-    let revealed, selection;
+    const lastKeyWasSpaceRef = { current: true };
+    let answerRevealed = false;
     const callback = getInputFunction("requestHint", {
         manualHints: true,
         english: "receive",
         answerRevealed: false,
         completedRef: { current: false },
         input: typed,
-        assistedPositions: [],
-        nextHintPosition: input.nextHintPosition,
         hintEventsRef: events,
         performance: { now: () => 7000 },
         recallStartedAtRef: { current: 0 },
-        setAssistedPositions: (x) => {
-            revealed = x;
+        lastKeyWasSpaceRef,
+        setAnswerRevealed: (value) => {
+            answerRevealed = value;
         },
-        setCurrentSelection: (x) => {
-            selection = x;
-        },
-        inputRef: { current: null },
-        setAnswerRevealed: () =>
-            assert.fail("partial hint must not reveal full answer"),
     });
-    callback(false);
+    callback();
     assert.equal(typed.join(""), "recieve");
-    assert.deepEqual(Array.from(revealed), [3]);
-    assert.equal(selection, 3);
+    assert.equal(answerRevealed, true);
+    assert.equal(lastKeyWasSpaceRef.current, false);
+    assert.equal(events.current.length, 1);
+    assert.equal(events.current[0].kind, "answer");
     assert.equal(events.current[0].correctBefore, 5);
     assert.equal(events.current[0].source, "manual");
-    assert.equal(
-        memory.evaluateRecall(
-            observation({
-                answerLength: 7,
-                revealedHintChars: 1,
-                finalCueRatio: 1 / 7,
-                additionalHintCount: 1,
-                firstAttemptCorrect: false,
-            }),
-        ).retryNeed,
-        "confirm",
-    );
 });
 
 test("answer confirmation records relearning once and never grants recall credit", () => {
