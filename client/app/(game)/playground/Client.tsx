@@ -657,7 +657,7 @@ export default function Client({
     useEffect(() => {
         bombPlanRef.current = {
             duration:
-                (currentTurnPlan?.retrievalWindowMs ?? 18_000) *
+                (currentTurnPlan?.retrievalWindowMs ?? 32_000) *
                 (currentTurnPlan?.bombPressure === "low" ? 1.35 : 1),
             paused:
                 !currentItem ||

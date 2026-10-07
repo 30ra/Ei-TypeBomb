@@ -818,83 +818,83 @@ function getInputFunction(name, globals) {
     ).callback;
 }
 
-test("actual manual hint callback preserves input and records only newly supplied positions", () => {
+test("manual hint shortcut is handled by the text input change path", () => {
+    const source = fs.readFileSync(
+        path.join(root, "components/feature/InputView.tsx"),
+        "utf8",
+    );
+    assert.match(source, /if \(char === " "\)/);
+    assert.match(source, /if \(lastKeyWasSpaceRef\.current\)/);
+    assert.match(source, /requestHint\(\)/);
+});
+
+test("full manual hint reuses the inline overlay and keeps typing enabled", () => {
+    const source = fs.readFileSync(
+        path.join(root, "components/feature/InputView.tsx"),
+        "utf8",
+    );
+    assert.match(
+        source,
+        /opacity-25 border-b border-\(--color-border\) flex items-center justify-center/,
+    );
+    assert.doesNotMatch(source, /確認して次へ/);
+    assert.doesNotMatch(source, /text-blue-600/);
+    assert.match(source, /\{!isReadonly && \(/);
+    assert.doesNotMatch(
+        source,
+        /if \(completedRef\.current \|\| answerRevealed\) return;/,
+    );
+});
+
+test("full hint clears existing incorrect input and resets on later wrong typing", () => {
+    const source = fs.readFileSync(
+        path.join(root, "components/feature/InputView.tsx"),
+        "utf8",
+    );
+    assert.match(
+        source,
+        /const hasIncorrectInput = input\.some\(/,
+    );
+    assert.match(
+        source,
+        /if \(hasIncorrectInput\) \{\s*resetInput\(\);\s*\}/,
+    );
+    assert.match(
+        source,
+        /typedInsideHint &&\s*\(!manualHints \|\| answerRevealed\)/,
+    );
+});
+
+test("actual manual hint callback reveals the full answer and records one answer event", () => {
     const typed = ["r", "e", "c", "i", "e", "v", "e"];
     const events = { current: [] };
-    let revealed, selection;
+    const lastKeyWasSpaceRef = { current: true };
+    let answerRevealed = false;
     const callback = getInputFunction("requestHint", {
         manualHints: true,
         english: "receive",
         answerRevealed: false,
         completedRef: { current: false },
         input: typed,
-        assistedPositions: [],
-        nextHintPosition: input.nextHintPosition,
         hintEventsRef: events,
         performance: { now: () => 7000 },
         recallStartedAtRef: { current: 0 },
-        setAssistedPositions: (x) => {
-            revealed = x;
+        lastKeyWasSpaceRef,
+        setAnswerRevealed: (value) => {
+            answerRevealed = value;
         },
-        setCurrentSelection: (x) => {
-            selection = x;
-        },
-        inputRef: { current: null },
-        setAnswerRevealed: () =>
-            assert.fail("partial hint must not reveal full answer"),
     });
-    callback(false);
+    callback();
     assert.equal(typed.join(""), "recieve");
-    assert.deepEqual(Array.from(revealed), [3]);
-    assert.equal(selection, 3);
+    assert.equal(answerRevealed, true);
+    assert.equal(lastKeyWasSpaceRef.current, false);
+    assert.equal(events.current.length, 1);
+    assert.equal(events.current[0].kind, "answer");
     assert.equal(events.current[0].correctBefore, 5);
     assert.equal(events.current[0].source, "manual");
-    assert.equal(
-        memory.evaluateRecall(
-            observation({
-                answerLength: 7,
-                revealedHintChars: 1,
-                finalCueRatio: 1 / 7,
-                additionalHintCount: 1,
-                firstAttemptCorrect: false,
-            }),
-        ).retryNeed,
-        "confirm",
-    );
 });
 
-test("answer confirmation records relearning once and never grants recall credit", () => {
-    const observations = [];
-    let advances = 0;
-    const callback = getInputFunction("confirmAnswer", {
-        english: "apple",
-        answerRevealed: true,
-        completedRef: { current: false },
-        initialCueRatio: 0,
-        hintCount: 1,
-        assistedPositions: [],
-        hintEventsRef: { current: [{ kind: "answer", source: "manual" }] },
-        attemptCountRef: { current: 1 },
-        incorrectInputCountRef: { current: 0 },
-        maxCorrectPrefixRef: { current: 0 },
-        firstKeyAtRef: { current: null },
-        recallStartedAtRef: { current: 0 },
-        performance: { now: () => 7000 },
-        onRecallComplete: (x) => observations.push(x),
-        onSuccess: () => advances++,
-    });
-    callback();
-    callback();
-    assert.equal(advances, 1);
-    assert.equal(observations.length, 1);
-    assert.equal(observations[0].success, false);
-    assert.equal(observations[0].answerWasFullyRevealed, true);
-    assert.equal(
-        memory.evaluateRecall(observations[0]).memoryEvidence,
-        "insufficient_evidence",
-    );
-    assert.equal(memory.evaluateRecall(observations[0]).retryNeed, "short");
-});
+
 
 test("actual playground progress callback pauses pressure on first hint", () => {
     const saved = { current: null };
