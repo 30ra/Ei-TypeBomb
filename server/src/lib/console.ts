@@ -71,9 +71,9 @@ const relativeTime = (at: number) => {
 
 const eventSymbol = (context: EventContext) => {
     if (context === "GAME") return { symbol: "→", color: ansi.cyan600 };
-    if (context === "ROOM") return { symbol: "◇", color: ansi.slate300 };
+    if (context === "ROOM") return { symbol: "◇", color: ansi.yellow };
     if (context === "ERROR") return { symbol: "!", color: ansi.red };
-    return { symbol: "•", color: ansi.slate500 };
+    return { symbol: "•", color: ansi.white };
 };
 
 const logo = () => {
@@ -278,7 +278,7 @@ const renderActivity = () => {
             return `${colorize(
                 padVisible(relativeTime(event.at), 9),
                 ansi.slate500,
-            )} ${colorize(symbol, color)}  ${event.message}`;
+            )} ${colorize(`${symbol} ${event.message}`, color)}`;
         })
         .join("\n");
 };
@@ -295,21 +295,21 @@ const formatState = () => {
         "",
         `${pulseIndicator()}    ${colorize(
             `${players} player${players === 1 ? "" : "s"}   ${state.rooms.length} room${state.rooms.length === 1 ? "" : "s"}   ${activeGames} game${activeGames === 1 ? "" : "s"}`,
-            ansi.slate500,
+            ansi.cyan600,
         )}`,
         "",
         renderLatency(),
         "",
         colorize(
             `ROOMS ${"─".repeat(Math.min(process.stdout.columns ?? 67, 67))}`,
-            ansi.slate300,
+            ansi.sage500,
         ),
         "",
         renderRooms(),
         "",
         colorize(
             `ACTIVITY ${"─".repeat(Math.min(process.stdout.columns ?? 64, 64))}`,
-            ansi.slate300,
+            ansi.sage500,
         ),
         "",
         renderActivity(),
@@ -403,11 +403,7 @@ export const logError = (
     });
 
     const roomId = metadata?.roomId;
-    if (
-        isInteractive &&
-        typeof roomId === "string" &&
-        roomId.length > 0
-    ) {
+    if (isInteractive && typeof roomId === "string" && roomId.length > 0) {
         roomIssues.set(roomId, Date.now() + 60_000);
     }
 
