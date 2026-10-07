@@ -544,6 +544,60 @@ function TypingAttempt({
                     onClick={() => {
                         if (!isReadonly) inputRef.current?.focus();
                     }}
+                    onKeyDown={(e) => {
+                        const isSpace = e.key === " " || e.code === "Space";
+                        if (manualHints && isSpace) {
+                            if (e.repeat) {
+                                e.preventDefault();
+                                return;
+                            }
+                            if (lastKeyWasSpaceRef.current) {
+                                e.preventDefault();
+                                requestHint();
+                                return;
+                            }
+                            lastKeyWasSpaceRef.current = true;
+                            if (english[currentSelection] !== " ") {
+                                e.preventDefault();
+                            }
+                            return;
+                        }
+                        if (!isSpace) {
+                            lastKeyWasSpaceRef.current = false;
+                        }
+                        if (e.key === "ArrowLeft") {
+                            e.preventDefault();
+                            setCurrentSelection(
+                                Math.max(0, currentSelection - 1),
+                            );
+                        }
+                        if (e.key === "ArrowRight") {
+                            e.preventDefault();
+                            setCurrentSelection(
+                                Math.min(
+                                    english.length - 1,
+                                    currentSelection + 1,
+                                ),
+                            );
+                        }
+                        if (e.key === "Backspace") {
+                            e.preventDefault();
+                            const next = [...input];
+                            if (next[currentSelection]) {
+                                next[currentSelection] = "";
+                                setInput(next);
+                                onChangeInput(next.join(""));
+                                return;
+                            }
+                            const prev = currentSelection - 1;
+                            if (prev >= 0) {
+                                next[prev] = "";
+                                setInput(next);
+                                setCurrentSelection(prev);
+                            }
+                            onChangeInput(next.join(""));
+                        }
+                    }}
                 >
                     {[...english].map((char, index) => {
                         const isSelected =
@@ -626,59 +680,6 @@ function TypingAttempt({
                                     moveToNext(next);
                                 }
                                 setCharInput("");
-                            }}
-                            onKeyDown={(e) => {
-                                if (manualHints && e.key === " ") {
-                                    if (e.repeat) {
-                                        e.preventDefault();
-                                        return;
-                                    }
-                                    if (lastKeyWasSpaceRef.current) {
-                                        e.preventDefault();
-                                        requestHint();
-                                        return;
-                                    }
-                                    lastKeyWasSpaceRef.current = true;
-                                    if (english[currentSelection] !== " ") {
-                                        e.preventDefault();
-                                    }
-                                    return;
-                                }
-                                if (e.key !== " ") {
-                                    lastKeyWasSpaceRef.current = false;
-                                }
-                                if (e.key === "ArrowLeft") {
-                                    e.preventDefault();
-                                    setCurrentSelection(
-                                        Math.max(0, currentSelection - 1),
-                                    );
-                                }
-                                if (e.key === "ArrowRight") {
-                                    e.preventDefault();
-                                    setCurrentSelection(
-                                        Math.min(
-                                            english.length - 1,
-                                            currentSelection + 1,
-                                        ),
-                                    );
-                                }
-                                if (e.key === "Backspace") {
-                                    e.preventDefault();
-                                    const next = [...input];
-                                    if (next[currentSelection]) {
-                                        next[currentSelection] = "";
-                                        setInput(next);
-                                        onChangeInput(next.join(""));
-                                        return;
-                                    }
-                                    const prev = currentSelection - 1;
-                                    if (prev >= 0) {
-                                        next[prev] = "";
-                                        setInput(next);
-                                        setCurrentSelection(prev);
-                                    }
-                                    onChangeInput(next.join(""));
-                                }
                             }}
                             onFocus={() => {
                                 setTimeout(() => {
