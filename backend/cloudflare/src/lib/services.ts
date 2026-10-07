@@ -2,8 +2,8 @@ import { jwtVerify } from 'jose';
 import { createClient } from '@supabase/supabase-js';
 import type { Room, Secrets } from '../types';
 
-import { ClientError, requireRoomItems } from '../../../server/src/shared/validation';
-export { ClientError, validateDisplayName } from '../../../server/src/shared/validation';
+import { ClientError, requireRoomItems } from '../../../shared/validation';
+export { ClientError, validateDisplayName } from '../../../shared/validation';
 export async function verifyToken(token: unknown, secret: string): Promise<string | null> {
 	if (typeof token !== 'string' || !secret) return null;
 	try {

@@ -1,7 +1,7 @@
 import { performance } from "node:perf_hooks";
 import type { Socket } from "socket.io";
 
-import { eventRateLimit } from "../shared/rateLimits";
+import { eventRateLimit } from "../../../shared/rateLimits";
 
 // Create once per connection. State is bounded by the configured event names
 // and is released with the socket; no timers or global socket registry needed.

@@ -26,7 +26,7 @@ Do not expose this connection string to the client or commit it to the repositor
 
 入力には高速なタイピングと通信遅延による短時間の集中送信の余裕を持たせ、
 DBアクセスを伴う認証・ゲーム開始には低めの閾値を設定しています。
-設定は `src/shared/rateLimits.ts` にあり、`src/lib/socketRateLimit.ts` が接続ごとに適用します。
+設定は `../shared/rateLimits.ts` にあり、`src/lib/socketRateLimit.ts` が接続ごとに適用します。
 
 超過分はハンドラー実行前に破棄し、エラー返信・ログ出力・遅延実行・切断は
 行いません。入力の超過は単語成功や退室の枠を消費せず、サーバー内部の
@@ -39,4 +39,4 @@ IP単位・複数接続をまたぐ制限は対象外です。
 検証: `npm test`（レート制限と実接続でのbroadcastテスト）、`npm run build`。
 
 共通ゲームコアと runtime の境界、ビルド出力、将来の拡張については
-[共通コアのREADME](src/shared/README.md) を参照してください。
+[共通コアのREADME](../shared/README.md) を参照してください。

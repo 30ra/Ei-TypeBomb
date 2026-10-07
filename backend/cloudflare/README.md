@@ -8,7 +8,7 @@ Supabase の既存 `ei_typebomb_rooms` テーブルは読み取りのみで使�
 ## ローカル起動
 
 ```sh
-cd cloudflare
+cd backend/cloudflare
 npm ci
 cp .dev.vars.example .dev.vars
 # .dev.vars に実際の値を設定
@@ -48,7 +48,7 @@ NEXT_PUBLIC_PRIMARY_SERVER_URL=http://localhost:8787/ws
 ## デプロイ
 
 ```sh
-cd cloudflare
+cd backend/cloudflare
 npx wrangler secret put JWT_SECRET
 npx wrangler secret put NEXT_PUBLIC_SUPABASE_URL
 npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
@@ -102,4 +102,4 @@ npm run build      # wrangler deploy --dry-run（公開しない）
 [Durable Object alarms](https://developers.cloudflare.com/durable-objects/api/alarms/)。
 
 共通ゲームコアと runtime の境界、deadline と将来の拡張については
-[共通コアのREADME](../server/src/shared/README.md) を参照してください。
+[共通コアのREADME](../shared/README.md) を参照してください。

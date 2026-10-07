@@ -5,15 +5,15 @@ import {
     nextGameDeadline,
     type GameContext,
     type GameEvent,
-} from "../src/shared/game";
-import type { GameState } from "../src/shared/types";
+} from "../../shared/game";
+import type { GameState } from "../../shared/types";
 import { NODE_GAME_RULES } from "../src/lib/gameAdapter";
-import { roomSnapshot } from "../src/shared/protocol";
+import { roomSnapshot } from "../../shared/protocol";
 import {
     parseClientEvent,
     validateDisplayName,
     requireRoomItems,
-} from "../src/shared/validation";
+} from "../../shared/validation";
 
 // Exercise the strict policy without importing files outside the server project.
 const STRICT_GAME_RULES: GameContext["rules"] = {

@@ -6,7 +6,7 @@ export interface Secrets {
 	POSTHOG_HOST?: string;
 }
 export type WorkerEnv = Env & Secrets;
-export type { User, TypedRecallItem, Item, Room, GameState } from '../../server/src/shared/types';
+export type { User, TypedRecallItem, Item, Room, GameState } from '../../shared/types';
 export type Session = {
 	id: string;
 	roomId: string;

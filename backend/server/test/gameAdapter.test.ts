@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { NodeGameAdapter } from '../src/lib/gameAdapter';
-import type { GameEffect, GameResult } from '../src/shared/game';
-import type { GameState } from '../src/shared/types';
+import type { GameEffect, GameResult } from '../../shared/game';
+import type { GameState } from '../../shared/types';
 
 const fresh = (): GameState => ({ room: {
     id: 'room', users: [{ id: 'a' }, { id: 'b' }], items: [{ id: 'item', type: 'typed_recall', prompt: '猫', answer: 'cat' }],

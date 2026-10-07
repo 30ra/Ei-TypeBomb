@@ -1,6 +1,6 @@
 import { performance } from "node:perf_hooks";
 
-import { EVENT_RATE_LIMITS } from "../shared/rateLimits";
+import { EVENT_RATE_LIMITS } from "../../../shared/rateLimits";
 
 const { capacity: CAPACITY, perSecond: TOKENS_PER_SECOND } =
     EVENT_RATE_LIMITS["health:database"];

@@ -1,8 +1,7 @@
 # Shared game core
 
-The common source lives at `server/src/shared/` so the Node server can be
-built and deployed from the `server/` directory alone. Worker imports target
-this same source at bundle time.
+The common source lives at `backend/shared/`, beside `backend/server/` and
+`backend/cloudflare/`. Both runtime adapters import this same source.
 
 `types.ts` defines serializable `Room` / `GameState` and opaque player IDs.
 `protocol.ts` defines both directions of the existing protocol, Socket.IO handler
@@ -14,17 +13,17 @@ client event payloads. `rateLimits.ts` owns common event budget settings.
 and ordered effects: protocol broadcasts and game activities. It does not mutate
 its input, access a database, use a transport or create a timer. The runtime
 supplies the clock, entropy and generated game ID. DB loaders still live in
-`server/src/lib/get.ts` and `cloudflare/src/lib/services.ts`; they pass the refreshed
+`backend/server/src/lib/get.ts` and `backend/cloudflare/src/lib/services.ts`; they pass the refreshed
 game duration into the core at start. There is no repository interface because
 these adapters do not need interchangeable database implementations yet.
 
 ## Runtime boundaries
 
-- Node: `server/src/lib/gameAdapter.ts` holds state and a private `setTimeout`
-  handle; `server/src/index.ts` handles Socket.IO, authentication, PostgreSQL,
+- Node: `backend/server/src/lib/gameAdapter.ts` holds state and a private `setTimeout`
+  handle; `backend/server/src/index.ts` handles Socket.IO, authentication, PostgreSQL,
   room lifecycle, logs and analytics. Async configuration reads recheck the
   current adapter and start eligibility before applying an event.
-- Worker: `cloudflare/src/index.ts` handles Native WebSocket, authentication,
+- Worker: `backend/cloudflare/src/index.ts` handles Native WebSocket, authentication,
   Supabase reads, DO Storage, hibernation and session expiry. It serializes game
   operations, saves transitions before publishing effects, and schedules the
   earliest game/session deadline through DO Alarm.
@@ -41,7 +40,7 @@ one bomb phase, matching the existing behavior.
 
 Existing differences are explicit in the runtime configuration:
 `NODE_GAME_RULES` in the Node adapter and `WORKER_GAME_RULES` in
-`cloudflare/src/lib/gameRules.ts`:
+`backend/cloudflare/src/lib/gameRules.ts`:
 Node permits spectator starts and holder passes during countdown; Worker rejects
 both. Worker clears typing input when stopping; Node retains its existing stop
 notification behavior. These settings preserve compatibility and can be unified
@@ -62,19 +61,22 @@ does not implement failover or cross-server synchronization.
 
 ## Verification and builds
 
-- `cd server && npm test`: shared unit tests, Node timer tests and existing tests.
-- `cd server && npm run build`: compiles Node and its imported shared sources.
-  TypeScript emits `server/dist/index.js` and `server/dist/shared/` directly.
+- `cd backend/server && npm test`: shared unit tests, Node timer tests and existing tests.
+- `cd backend/server && npm run build`: compiles Node and its imported shared sources.
+  TypeScript emits Node code at `backend/server/dist/server/src/` and shared
+  code at `backend/server/dist/shared/`. A generated `dist/index.js` entry keeps
+  the compiled startup path unchanged.
   `npm start` / `npm run dev` keep working.
   Deploy the complete `dist` directory when using compiled JavaScript.
-- `cd server && npm run typecheck`: checks both source and Node tests. The tests
+- `cd backend/server && npm run typecheck`: checks both source and Node tests. The tests
   have a dedicated `test/tsconfig.json` using the server's `@types/node`.
-- `cd cloudflare && npm test`: Worker integration tests, including a scenario that
+- `cd backend/cloudflare && npm test`: Worker integration tests, including a scenario that
   applies the same events through the real GameRoom adapter and NodeGameAdapter
   and compares persisted states after every event.
-- `cd cloudflare && npm run typecheck && npm run build`: typecheck and Wrangler
+- `cd backend/cloudflare && npm run typecheck && npm run build`: typecheck and Wrangler
   dry-run bundle (no deployment). Wrangler bundles imported shared sources.
 
-Node source, tests and build configuration only reference files inside `server/`.
-For Worker builds, retain `server/src/shared/` beside `cloudflare/` in the repository;
-shared code adds no dependencies or install step.
+Keep `backend/shared/` beside the selected runtime directory when building or
+running TypeScript sources. Shared code adds no dependencies or install step.
+The standalone shared TypeScript configuration uses only ES types; Node tests
+remain under `backend/server/test/` and resolve that project's `@types/node`.

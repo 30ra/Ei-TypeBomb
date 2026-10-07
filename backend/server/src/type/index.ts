@@ -4,4 +4,4 @@ export type {
     Room,
     User,
     GameState,
-} from "../shared/types";
+} from "../../../shared/types";
