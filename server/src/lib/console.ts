@@ -38,6 +38,7 @@ let animationTimer: NodeJS.Timeout | undefined;
 
 const ansi = {
     reset: "\x1b[0m",
+    bold: "\x1b[1m",
     white: "\x1b[97m",
     yellow: "\x1b[33m",
     red: "\x1b[31m",
@@ -48,6 +49,10 @@ const ansi = {
     slate300: "\x1b[38;2;203;213;225m",
     slate500: "\x1b[38;2;100;116;139m",
     slate700: "\x1b[38;2;51;65;85m",
+    sage400: "\x1b[38;2;126;170;149m",
+    sage500: "\x1b[38;2;95;146;122m",
+    sage600: "\x1b[38;2;85;127;109m",
+    sage700: "\x1b[38;2;62;98;82m",
 };
 
 const colorize = (text: string, color: string) =>
@@ -57,10 +62,7 @@ const padVisible = (text: string, width: number) =>
     text + " ".repeat(Math.max(0, width - text.length));
 
 const relativeTime = (at: number) => {
-    const seconds = Math.max(0, Math.floor((Date.now() - at) / 1000));
-    if (seconds < 2) return "now";
-    if (seconds < 60) return `${seconds}s ago`;
-    const minutes = Math.floor(seconds / 60);
+    const minutes = Math.max(0, Math.floor((Date.now() - at) / 60_000));
     if (minutes < 60) return `${minutes}m ago`;
     const hours = Math.floor(minutes / 60);
     if (hours < 24) return `${hours}h ago`;
@@ -76,11 +78,11 @@ const eventSymbol = (context: EventContext) => {
 
 const logo = () => {
     const etb = [
-        "█████ █████ ████ ",
-        "█       █   █   █",
-        "████    █   ████ ",
-        "█       █   █   █",
-        "█████   █   ████ ",
+        "███████  ███████  ██████  ",
+        "██          ██     ██   ██ ",
+        "██████      ██     ██████  ",
+        "██          ██     ██   ██ ",
+        "███████     ██     ██████  ",
     ];
     const consoleWord = [
         " ███  ███  █   █ ████  ███  █    █████",
@@ -114,12 +116,12 @@ const pulseIndicator = () => {
         )}`;
     }
 
-    const frames = [ansi.cyan600, ansi.cyan700, ansi.cyan800, ansi.cyan900];
-    const phase = Math.floor(Date.now() / 420) % 6;
+    const frames = [ansi.sage400, ansi.sage500, ansi.sage600, ansi.sage700];
+    const phase = Math.floor(Date.now() / 240) % 6;
     const frameIndex = phase <= 3 ? phase : 6 - phase;
     return `${colorize("█", frames[frameIndex])} ${colorize(
-        "Used",
-        ansi.white,
+        `${ansi.bold}Used`,
+        ansi.sage600,
     )}`;
 };
 
@@ -137,8 +139,8 @@ const renderLatency = () => {
     if (latest === undefined) {
         return [
             `LATENCY   ${colorize(
-                "░".repeat(24),
-                ansi.slate700,
+                "█".repeat(24),
+                ansi.slate300,
             )}   ${colorize("— ms", ansi.slate500)}`,
             `          ${colorize(
                 "waiting for connection samples",
@@ -150,8 +152,8 @@ const renderLatency = () => {
     const width = 24;
     const filled = Math.max(1, Math.round(latencyQuality(latest) * width));
     const gauge =
-        colorize("█".repeat(filled), latencyColor(latest)) +
-        colorize("░".repeat(width - filled), ansi.slate700);
+        colorize("█".repeat(filled), ansi.cyan600) +
+        colorize("█".repeat(width - filled), ansi.slate300);
 
     const sparkChars = "▁▂▃▄▅▆▇█";
     const spark = latencySamples
@@ -297,13 +299,13 @@ const formatState = () => {
         "",
         renderLatency(),
         "",
-        colorize("ROOMS", ansi.slate300),
         colorize("─".repeat(Math.min(process.stdout.columns ?? 72, 72)), ansi.slate700),
+        colorize("ROOMS", ansi.slate300),
         "",
         renderRooms(),
         "",
-        colorize("ACTIVITY", ansi.slate300),
         colorize("─".repeat(Math.min(process.stdout.columns ?? 72, 72)), ansi.slate700),
+        colorize("ACTIVITY", ansi.slate300),
         "",
         renderActivity(),
     ].join("\n");
@@ -418,7 +420,7 @@ export const startConsole = (port: number) => {
                 if (expiresAt <= Date.now()) roomIssues.delete(roomId);
             }
             scheduleRender();
-        }, 420);
+        }, 240);
         animationTimer.unref();
     }
 
