@@ -300,3 +300,58 @@ it('rejects empty item lists without authenticating the socket', async () => {
 		await runInDurableObject(stub, (_, ctx) => ctx.getWebSockets().some((ws) => (ws.deserializeAttachment() as Session).authenticated)),
 	).toBe(false);
 });
+
+it('Node and Durable Object adapters produce identical states for the same game scenario', async () => {
+	const { NodeGameAdapter } = await import('../../server/src/lib/gameAdapter');
+	const initial: GameState = { room: {
+		id: roomId, maxPlayers: 2, gameDuration: 20,
+		items: [0, 1, 2].map(id => ({ id: String(id), type: 'typed_recall', prompt: '猫', answer: 'cat' })),
+		users: [], isStart: false, bombHolder: 0, bombStatus: 0,
+	} };
+	// Keep real runtime alarms/timers in the future; advance the core's injected clock.
+	let now = Date.now() + 3_600_000;
+	vi.spyOn(Math, 'random').mockReturnValue(0);
+	const node = new NodeGameAdapter(structuredClone(initial), () => {}, () => now, () => 0);
+	const stub = env.GAME_ROOMS.getByName(roomId);
+	type AdapterView = {
+		game: GameState;
+		apply(event: import('../../shared/game').GameEvent, now: number): void;
+		save(): Promise<void>;
+	};
+	await runInDurableObject(stub, instance => {
+		(instance as unknown as AdapterView).game = structuredClone(initial);
+	});
+	async function both(event: import('../../shared/game').GameEvent) {
+		node.apply(event);
+		const stored = await runInDurableObject(stub, async (instance, ctx) => {
+			const worker = instance as unknown as AdapterView;
+			worker.apply(event, now);
+			await worker.save();
+			return ctx.storage.get<GameState>('game');
+		});
+		expect(node.state).toEqual(stored);
+	}
+	try {
+		for (const id of ['a', 'b', 'c']) await both({ type: 'room:join', player: { id, displayName: id } });
+		await both({ type: 'game:start', playerId: 'a', gameId: 'same-game', gameDuration: 20 });
+		now += 3000;
+		await both({ type: 'deadline' });
+		await both({ type: 'word:success', playerId: 'b' }); // non-holder
+		await both({ type: 'currentInput', playerId: 'a', input: 'x'.repeat(40) });
+		await both({ type: 'word:success', playerId: 'a' });
+		await both({ type: 'word:success', playerId: 'b' }); // wrap around
+		for (let phase = 0; phase < 5; phase++) {
+			now = node.state.bombAt!;
+			await both({ type: 'deadline' });
+		}
+		expect(node.state.room.users).toHaveLength(0);
+		expect(node.state.room.isStart).toBe(false);
+		for (const id of ['a', 'b']) await both({ type: 'room:join', player: { id, displayName: id } });
+		await both({ type: 'game:start', playerId: 'a', gameId: 'cancelled-game', gameDuration: 20 });
+		await both({ type: 'room:leave', playerId: 'b', reason: 'disconnect' });
+		expect(node.state.wordAt).toBeUndefined();
+		expect(node.state.bombAt).toBeUndefined();
+	} finally {
+		node.dispose();
+	}
+});

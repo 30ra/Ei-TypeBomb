@@ -100,3 +100,6 @@ npm run build      # wrangler deploy --dry-run（公開しない）
 
 参考: [WebSocket Hibernation](https://developers.cloudflare.com/durable-objects/best-practices/websockets/)、
 [Durable Object alarms](https://developers.cloudflare.com/durable-objects/api/alarms/)。
+
+共通ゲームコアと runtime の境界、deadline と将来の拡張については
+[shared/README.md](../shared/README.md) を参照してください。

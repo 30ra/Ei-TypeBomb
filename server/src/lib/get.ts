@@ -47,8 +47,12 @@ export const getRoomFromId = async (id: string) => {
             password: data.password,
             createdAt: data.created_at ?? undefined,
             updatedAt: data.updated_at ?? undefined,
-            items: data.items ?? undefined,
-        } as Room;
+            items: data.items ?? [],
+            users: [],
+            isStart: false,
+            bombHolder: 0,
+            bombStatus: 0,
+        } satisfies Room;
     } catch (error) {
         console.error(
             "Failed to read room from PostgreSQL:",
