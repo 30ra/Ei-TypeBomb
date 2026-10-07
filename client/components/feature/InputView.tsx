@@ -2,7 +2,6 @@ import {
     correctPrefixLength,
     getInitialCueLength,
     hintCoversError,
-    nextHintPosition,
 } from "@/lib/playground/recall-input";
 import { useEffect, useRef, useState } from "react";
 import { io } from "@/lib/room/socket";
@@ -92,21 +91,10 @@ function TypingAttempt({
 
     const isReadonly = currentInput !== null;
     const manualHints = Boolean(learningMode) && !isReadonly;
-    const [assistedPositions, setAssistedPositions] = useState<number[]>([]);
     const [answerRevealed, setAnswerRevealed] = useState(false);
-    const [hintSuggested, setHintSuggested] = useState(false);
+    const lastKeyWasSpaceRef = useRef(false);
     const hintEventsRef = useRef<NonNullable<RecallProgress["hintEvents"]>>([]);
     const completedRef = useRef(false);
-
-    useEffect(() => {
-        if (!manualHints || answerRevealed) return;
-        const timer = setInterval(() => {
-            setHintSuggested(
-                performance.now() - lastCorrectProgressAtRef.current >= 6_000,
-            );
-        }, 500);
-        return () => clearInterval(timer);
-    }, [manualHints, answerRevealed]);
 
     useEffect(() => {
         inputStateRef.current = input;
@@ -303,39 +291,28 @@ function TypingAttempt({
     };
 
     const hintCount = manualHints
-        ? assistedPositions.length + Number(answerRevealed)
+        ? Number(answerRevealed)
         : baseHintCount + timedHintCount;
     const hintLength = manualHints
         ? answerRevealed
             ? (english?.length ?? 0)
-            : assistedPositions.length
+            : 0
         : revealedHintLength;
 
-    const requestHint = (full: boolean) => {
+    const requestHint = () => {
         if (!manualHints || !english || answerRevealed || completedRef.current)
             return;
-        const position = full
-            ? null
-            : nextHintPosition(input, english, assistedPositions);
-        if (!full && position === null) return;
         hintEventsRef.current.push({
-            kind: full ? "answer" : "letter",
+            kind: "answer",
             source: "manual",
             atMs: Math.max(0, performance.now() - recallStartedAtRef.current),
-            position,
+            position: null,
             correctBefore: input.filter(
-                (char, i) =>
-                    char === english[i] &&
-                    english[i] !== " " &&
-                    !assistedPositions.includes(i),
+                (char, i) => char === english[i] && english[i] !== " ",
             ).length,
         });
-        if (full) setAnswerRevealed(true);
-        else if (position !== null) {
-            setAssistedPositions([...assistedPositions, position]);
-            setCurrentSelection(position);
-            inputRef.current?.focus();
-        }
+        lastKeyWasSpaceRef.current = false;
+        setAnswerRevealed(true);
     };
 
     const confirmAnswer = () => {
@@ -352,7 +329,7 @@ function TypingAttempt({
             additionalHintCount: hintCount,
             hintCount,
             revealedHintChars: english.length,
-            assistedPositions,
+            assistedPositions: [],
             hintEvents: [...hintEventsRef.current],
             attemptCount: attemptCountRef.current,
             incorrectInputCount: incorrectInputCountRef.current,
@@ -377,7 +354,7 @@ function TypingAttempt({
             incorrectInputCount: incorrectInputCountRef.current,
             hintCount,
             revealedHintChars: hintLength,
-            assistedPositions: manualHints ? assistedPositions : undefined,
+            assistedPositions: manualHints ? [] : undefined,
             hintEvents: manualHints ? [...hintEventsRef.current] : undefined,
             answerWasFullyRevealed: manualHints
                 ? answerRevealed
@@ -403,7 +380,6 @@ function TypingAttempt({
         isReadonly,
         onRecallProgress,
         manualHints,
-        assistedPositions,
         answerRevealed,
     ]);
 
@@ -460,9 +436,7 @@ function TypingAttempt({
                     answerWasFullyRevealed: manualHints
                         ? answerRevealed
                         : hintLength >= english.length,
-                    assistedPositions: manualHints
-                        ? assistedPositions
-                        : undefined,
+                    assistedPositions: manualHints ? [] : undefined,
                     hintEvents: manualHints
                         ? [...hintEventsRef.current]
                         : undefined,
@@ -538,9 +512,8 @@ function TypingAttempt({
                     {japanese}
                 </div>
             </div>
-            {manualHints && (
+            {manualHints && answerRevealed && (
                 <div className="flex flex-col items-center gap-2">
-                    {answerRevealed ? (
                         <div
                             className="rounded-lg border border-(--color-border) p-4 text-center"
                             role="status"
@@ -558,48 +531,7 @@ function TypingAttempt({
                                 確認して次へ
                             </button>
                         </div>
-                    ) : (
-                        <>
-                            <p className="text-sm" role="status">
-                                {hintSuggested
-                                    ? "ヒントを使うと、この問題のタイマーが止まります。"
-                                    : "必要なときにヒントを使えます。"}
-                            </p>
-                            <div className="flex gap-3">
-                                <button
-                                    type="button"
-                                    className="rounded border px-3 py-2 disabled:opacity-50 focus-visible:outline-2"
-                                    disabled={
-                                        nextHintPosition(
-                                            input,
-                                            english,
-                                            assistedPositions,
-                                        ) === null
-                                    }
-                                    onClick={() => requestHint(false)}
-                                >
-                                    1文字ヒント
-                                </button>
-                                <button
-                                    type="button"
-                                    className="rounded border px-3 py-2 focus-visible:outline-2"
-                                    onClick={() => requestHint(true)}
-                                >
-                                    答えを見る
-                                </button>
-                            </div>
-                            {nextHintPosition(
-                                input,
-                                english,
-                                assistedPositions,
-                            ) === null && (
-                                <p className="text-sm">
-                                    残りは自分で回答するか、答えを確認できます。
-                                </p>
-                            )}
-                        </>
-                    )}
-                </div>
+                 </div>
             )}
             <div className="w-full flex justify-center">
                 <div
@@ -647,8 +579,7 @@ function TypingAttempt({
                                 }}
                             >
                                 {(manualHints
-                                    ? answerRevealed ||
-                                      assistedPositions.includes(index)
+                                    ? answerRevealed
                                     : index < hintLength) && (
                                     <div
                                         className={
@@ -697,6 +628,18 @@ function TypingAttempt({
                                 setCharInput("");
                             }}
                             onKeyDown={(e) => {
+                                if (manualHints && e.key === " ") {
+                                    e.preventDefault();
+                                    if (lastKeyWasSpaceRef.current) {
+                                        requestHint();
+                                    } else {
+                                        lastKeyWasSpaceRef.current = true;
+                                    }
+                                    return;
+                                }
+                                if (e.key !== " ") {
+                                    lastKeyWasSpaceRef.current = false;
+                                }
                                 if (e.key === "ArrowLeft") {
                                     e.preventDefault();
                                     setCurrentSelection(
