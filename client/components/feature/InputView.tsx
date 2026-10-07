@@ -2,6 +2,7 @@ import {
     correctPrefixLength,
     getInitialCueLength,
     hintCoversError,
+    nextHintPosition,
 } from "@/lib/playground/recall-input";
 import { useEffect, useRef, useState } from "react";
 import { io } from "@/lib/room/socket";
@@ -90,6 +91,22 @@ function TypingAttempt({
     const hintDelaysKey = hintDelaysMs?.join(",") ?? "disabled";
 
     const isReadonly = currentInput !== null;
+    const manualHints = Boolean(learningMode) && !isReadonly;
+    const [assistedPositions, setAssistedPositions] = useState<number[]>([]);
+    const [answerRevealed, setAnswerRevealed] = useState(false);
+    const [hintSuggested, setHintSuggested] = useState(false);
+    const hintEventsRef = useRef<NonNullable<RecallProgress["hintEvents"]>>([]);
+    const completedRef = useRef(false);
+
+    useEffect(() => {
+        if (!manualHints || answerRevealed) return;
+        const timer = setInterval(() => {
+            setHintSuggested(
+                performance.now() - lastCorrectProgressAtRef.current >= 6_000,
+            );
+        }, 500);
+        return () => clearInterval(timer);
+    }, [manualHints, answerRevealed]);
 
     useEffect(() => {
         inputStateRef.current = input;
@@ -114,6 +131,7 @@ function TypingAttempt({
 
         const activeHintDelays = hintDelaysMs;
         if (
+            manualHints ||
             activeHintDelays === null ||
             activeHintDelays.length === 0 ||
             initialCueRatio >= 1
@@ -211,6 +229,7 @@ function TypingAttempt({
             if (timer) clearTimeout(timer);
         };
     }, [
+        manualHints,
         cueSteps,
         cueStepsKey,
         english,
@@ -283,8 +302,72 @@ function TypingAttempt({
         onChangeInput("");
     };
 
-    const hintCount = baseHintCount + timedHintCount;
-    const hintLength = revealedHintLength;
+    const hintCount = manualHints
+        ? assistedPositions.length + Number(answerRevealed)
+        : baseHintCount + timedHintCount;
+    const hintLength = manualHints
+        ? answerRevealed
+            ? (english?.length ?? 0)
+            : assistedPositions.length
+        : revealedHintLength;
+
+    const requestHint = (full: boolean) => {
+        if (!manualHints || !english || answerRevealed || completedRef.current)
+            return;
+        const position = full
+            ? null
+            : nextHintPosition(input, english, assistedPositions);
+        if (!full && position === null) return;
+        hintEventsRef.current.push({
+            kind: full ? "answer" : "letter",
+            source: "manual",
+            atMs: Math.max(0, performance.now() - recallStartedAtRef.current),
+            position,
+            correctBefore: input.filter(
+                (char, i) =>
+                    char === english[i] &&
+                    english[i] !== " " &&
+                    !assistedPositions.includes(i),
+            ).length,
+        });
+        if (full) setAnswerRevealed(true);
+        else if (position !== null) {
+            setAssistedPositions([...assistedPositions, position]);
+            setCurrentSelection(position);
+            inputRef.current?.focus();
+        }
+    };
+
+    const confirmAnswer = () => {
+        if (!english || !answerRevealed || completedRef.current) return;
+        completedRef.current = true;
+        onRecallComplete?.({
+            success: false,
+            outcome: "relearned",
+            answerLength: english.length,
+            firstAttemptCorrect: false,
+            answerWasFullyRevealed: true,
+            initialCueRatio,
+            finalCueRatio: 1,
+            additionalHintCount: hintCount,
+            hintCount,
+            revealedHintChars: english.length,
+            assistedPositions,
+            hintEvents: [...hintEventsRef.current],
+            attemptCount: attemptCountRef.current,
+            incorrectInputCount: incorrectInputCountRef.current,
+            maxCorrectPrefixLength: maxCorrectPrefixRef.current,
+            recallLatencyMs:
+                firstKeyAtRef.current === null
+                    ? null
+                    : firstKeyAtRef.current - recallStartedAtRef.current,
+            elapsedMs: Math.max(
+                0,
+                performance.now() - recallStartedAtRef.current,
+            ),
+        });
+        onSuccess();
+    };
 
     useEffect(() => {
         if (isReadonly || !english) return;
@@ -294,6 +377,11 @@ function TypingAttempt({
             incorrectInputCount: incorrectInputCountRef.current,
             hintCount,
             revealedHintChars: hintLength,
+            assistedPositions: manualHints ? assistedPositions : undefined,
+            hintEvents: manualHints ? [...hintEventsRef.current] : undefined,
+            answerWasFullyRevealed: manualHints
+                ? answerRevealed
+                : hintLength >= english.length,
             maxCorrectPrefixLength: maxCorrectPrefixRef.current,
             recallLatencyMs:
                 firstKeyAtRef.current === null
@@ -307,11 +395,22 @@ function TypingAttempt({
                 performance.now() - recallStartedAtRef.current,
             ),
         });
-    }, [english, hintCount, hintLength, input, isReadonly, onRecallProgress]);
+    }, [
+        english,
+        hintCount,
+        hintLength,
+        input,
+        isReadonly,
+        onRecallProgress,
+        manualHints,
+        assistedPositions,
+        answerRevealed,
+    ]);
 
     if (!english) return null;
 
     const moveToNext = (next: string[]) => {
+        if (completedRef.current || answerRevealed) return;
         // Record the incorrect character when entered, before Backspace/reset can erase it.
         if (next[currentSelection] !== english[currentSelection])
             incorrectInputCountRef.current += 1;
@@ -325,17 +424,21 @@ function TypingAttempt({
             currentSelection < hintLength &&
             next[currentSelection] !== english[currentSelection];
 
-        if (typedInsideHint) {
+        if (typedInsideHint && !manualHints) {
             resetInput();
             return;
         }
 
-        if (nextIndex < english.length) {
+        if (
+            nextIndex < english.length &&
+            !(manualHints && next.join("") === english)
+        ) {
             setCurrentSelection(nextIndex);
             onChangeInput(next.join(""));
         } else {
             const result = next.join("");
             if (result === english) {
+                completedRef.current = true;
                 const finalCueRatio = hintLength / Math.max(1, english.length);
                 const outcome =
                     learningMode === "encoding"
@@ -351,8 +454,18 @@ function TypingAttempt({
                     outcome,
                     finalCueRatio,
                     initialCueRatio,
-                    additionalHintCount: timedHintCount,
-                    answerWasFullyRevealed: hintLength >= english.length,
+                    additionalHintCount: manualHints
+                        ? hintCount
+                        : timedHintCount,
+                    answerWasFullyRevealed: manualHints
+                        ? answerRevealed
+                        : hintLength >= english.length,
+                    assistedPositions: manualHints
+                        ? assistedPositions
+                        : undefined,
+                    hintEvents: manualHints
+                        ? [...hintEventsRef.current]
+                        : undefined,
                     firstAttemptCorrect:
                         attemptCountRef.current === 1 &&
                         incorrectInputCountRef.current === 0 &&
@@ -396,7 +509,14 @@ function TypingAttempt({
                 }
             } else {
                 console.log("Wrong answer. Query:", result);
-                resetInput();
+                if (manualHints) {
+                    attemptCountRef.current += 1;
+                    setCurrentSelection(
+                        next.findIndex((char, i) => char !== english[i]),
+                    );
+                    onChangeInput(next.join(""));
+                    triggerFailAnimation();
+                } else resetInput();
             }
         }
     };
@@ -418,6 +538,69 @@ function TypingAttempt({
                     {japanese}
                 </div>
             </div>
+            {manualHints && (
+                <div className="flex flex-col items-center gap-2">
+                    {answerRevealed ? (
+                        <div
+                            className="rounded-lg border border-(--color-border) p-4 text-center"
+                            role="status"
+                        >
+                            <p className="text-xl font-bold">{english}</p>
+                            <p>{japanese}</p>
+                            <p className="text-sm">
+                                答えを確認しました。あとでもう一度練習します。
+                            </p>
+                            <button
+                                type="button"
+                                className="mt-3 rounded border px-3 py-2 focus-visible:outline-2"
+                                onClick={confirmAnswer}
+                            >
+                                確認して次へ
+                            </button>
+                        </div>
+                    ) : (
+                        <>
+                            <p className="text-sm" role="status">
+                                {hintSuggested
+                                    ? "ヒントを使うと、この問題のタイマーが止まります。"
+                                    : "必要なときにヒントを使えます。"}
+                            </p>
+                            <div className="flex gap-3">
+                                <button
+                                    type="button"
+                                    className="rounded border px-3 py-2 disabled:opacity-50 focus-visible:outline-2"
+                                    disabled={
+                                        nextHintPosition(
+                                            input,
+                                            english,
+                                            assistedPositions,
+                                        ) === null
+                                    }
+                                    onClick={() => requestHint(false)}
+                                >
+                                    1文字ヒント
+                                </button>
+                                <button
+                                    type="button"
+                                    className="rounded border px-3 py-2 focus-visible:outline-2"
+                                    onClick={() => requestHint(true)}
+                                >
+                                    答えを見る
+                                </button>
+                            </div>
+                            {nextHintPosition(
+                                input,
+                                english,
+                                assistedPositions,
+                            ) === null && (
+                                <p className="text-sm">
+                                    残りは自分で回答するか、答えを確認できます。
+                                </p>
+                            )}
+                        </>
+                    )}
+                </div>
+            )}
             <div className="w-full flex justify-center">
                 <div
                     ref={inputFrameRef}
@@ -463,8 +646,17 @@ function TypingAttempt({
                                     inputRef.current?.focus();
                                 }}
                             >
-                                {index < hintLength && (
-                                    <div className="absolute inset-1 pointer-events-none opacity-25 border-b border-(--color-border) flex items-center justify-center">
+                                {(manualHints
+                                    ? answerRevealed ||
+                                      assistedPositions.includes(index)
+                                    : index < hintLength) && (
+                                    <div
+                                        className={
+                                            manualHints
+                                                ? "absolute top-0 inset-x-0 pointer-events-none text-sm text-blue-600 dark:text-blue-300 text-center"
+                                                : "absolute inset-1 pointer-events-none opacity-25 border-b border-(--color-border) flex items-center justify-center"
+                                        }
+                                    >
                                         {char}
                                     </div>
                                 )}
@@ -474,7 +666,7 @@ function TypingAttempt({
                             </button>
                         );
                     })}
-                    {!isReadonly && (
+                    {!isReadonly && !answerRevealed && (
                         <input
                             ref={inputRef}
                             value={charInput}
@@ -547,6 +739,7 @@ function TypingAttempt({
                                 }, 300);
                             }}
                             className="absolute inset-0 w-full h-full opacity-[0.01] z-10"
+                            aria-label="英語の回答"
                             autoComplete="off"
                             autoCapitalize="off"
                             autoCorrect="off"

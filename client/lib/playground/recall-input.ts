@@ -25,3 +25,22 @@ export const hintCoversError = (
         (char, index) =>
             index < length && char !== "" && char !== answer[index],
     );
+
+// Reveal only unresolved letters; spaces are already visible in the input layout.
+// Keep one unresolved letter for retrieval instead of silently revealing the answer.
+export const nextHintPosition = (
+    input: string[],
+    answer: string,
+    revealed: readonly number[],
+): number | null => {
+    const unresolved = Array.from(
+        { length: answer.length },
+        (_, i) => i,
+    ).filter(
+        (i) =>
+            answer[i] !== " " &&
+            input[i] !== answer[i] &&
+            !revealed.includes(i),
+    );
+    return unresolved.length > 1 ? unresolved[0] : null;
+};
