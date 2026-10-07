@@ -13,6 +13,7 @@ import { createDatabaseProbeRateLimit } from "./lib/databaseProbeRateLimit";
 import {
     logError,
     logEvent,
+    recordLatencySample,
     setServerState,
     startConsole,
 } from "./lib/console";
@@ -66,12 +67,15 @@ const acceptDatabaseProbe = createDatabaseProbeRateLimit();
 
 const refreshServerState = () =>
     setServerState({
-        rooms: rooms.length,
-        players: rooms.reduce(
-            (total, room) => total + (room.users?.length ?? 0),
-            0,
-        ),
-        games: rooms.filter((room) => room.isStart).length,
+        rooms: rooms.map((room) => ({
+            id: room.id,
+            players: (room.users ?? []).map((player) => ({
+                id: player.id,
+                displayName: player.displayName,
+            })),
+            isStart: Boolean(room.isStart),
+            bombHolder: room.bombHolder,
+        })),
     });
 
 const createRoomIfNeeded = (roomId: string): Promise<Room | null> => {
@@ -134,6 +138,17 @@ const sendInputUpdate = (roomId: string | null, input: string) => {
 
 io.on("connection", (socket) => {
     socket.use(createSocketRateLimit());
+
+    let pingStartedAt: number | undefined;
+    socket.conn.on("packetCreate", (packet) => {
+        if (packet.type === "ping") pingStartedAt = performance.now();
+    });
+    socket.conn.on("packet", (packet) => {
+        if (packet.type !== "pong" || pingStartedAt === undefined) return;
+        recordLatencySample(performance.now() - pingStartedAt);
+        pingStartedAt = undefined;
+    });
+
     let user: User = { id: socket.id };
     let roomId: null | string = null;
     const getRoomIndex = () => rooms.findIndex((item) => item.id === roomId);
@@ -308,6 +323,7 @@ io.on("connection", (socket) => {
         const nextHolder = room.users[room.bombHolder];
         if (room.items?.length)
             room.wordIndex = Math.floor(Math.random() * room.items.length);
+        refreshServerState();
         logEvent("GAME", `word passed in ${roomId}`, {
             roomId,
             gameId: room.gameId,
