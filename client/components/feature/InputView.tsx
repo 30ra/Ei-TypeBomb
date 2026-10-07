@@ -629,11 +629,18 @@ function TypingAttempt({
                             }}
                             onKeyDown={(e) => {
                                 if (manualHints && e.key === " ") {
-                                    e.preventDefault();
+                                    if (e.repeat) {
+                                        e.preventDefault();
+                                        return;
+                                    }
                                     if (lastKeyWasSpaceRef.current) {
+                                        e.preventDefault();
                                         requestHint();
-                                    } else {
-                                        lastKeyWasSpaceRef.current = true;
+                                        return;
+                                    }
+                                    lastKeyWasSpaceRef.current = true;
+                                    if (english[currentSelection] !== " ") {
+                                        e.preventDefault();
                                     }
                                     return;
                                 }
