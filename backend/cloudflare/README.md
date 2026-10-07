@@ -47,8 +47,29 @@ NEXT_PUBLIC_PRIMARY_SERVER_URL=http://localhost:8787/ws
 
 ## デプロイ
 
+### Cloudflare Workers Builds（Git連携）
+
+Worker の **Settings > Build** に以下を設定してください。
+
+| 項目 | 設定値 |
+| --- | --- |
+| Root directory | `backend/cloudflare` |
+| Build command | `npm ci --include=dev && npm run build` |
+| Deploy command | `npm run deploy` |
+
+コマンドは Root directory 内で実行されるので、`cd cloudflare` は付けません。
+`wrangler` は devDependencies にあるため、`--include=dev` でビルド用の依存関係も
+インストールします。`npm run build` は dry-run のみで、公開は Deploy command が行います。
+ビルド対象のブランチに `backend/` への移動が反映されていることも確認してください。
+共通コードの `backend/shared/` は同じリポジトリから読み込みます。
+
+設定仕様: [Workers Builds configuration](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/)。
+
+### CLI
+
 ```sh
 cd backend/cloudflare
+npm ci --include=dev
 npx wrangler secret put JWT_SECRET
 npx wrangler secret put NEXT_PUBLIC_SUPABASE_URL
 npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY

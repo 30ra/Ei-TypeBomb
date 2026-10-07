@@ -40,5 +40,11 @@ Worker, including bundled shared code. Worker production builds do not import
 Node runtime sources; the cross-adapter test imports the Node adapter for tests.
 The deployed Worker does not access repository files at runtime.
 
+For Git-connected Workers Builds, set Root directory to `backend/cloudflare`,
+Build command to `npm ci --include=dev && npm run build`, and Deploy command to
+`npm run deploy`. Commands run inside the configured root; do not prepend
+`cd cloudflare`. The explicit install includes Wrangler's devDependency even
+when the environment otherwise omits development dependencies.
+
 Runtime details: [server](server/README.md), [Cloudflare](cloudflare/README.md),
 and [shared core](shared/README.md).
