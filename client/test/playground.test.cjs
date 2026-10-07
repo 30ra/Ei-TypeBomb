@@ -699,8 +699,6 @@ test("actual input callbacks retain a wrong character through Backspace correcti
         incorrectInputCountRef: ref(0),
         maxCorrectPrefixRef: ref(0),
         lastCorrectProgressAtRef: ref(0),
-        lastKeyWasSpaceRef: ref(false),
-        requestHint: noop,
         firstKeyAtRef: ref(100),
         recallStartedAtRef: ref(0),
         inputFrameRef: ref(null),
@@ -819,6 +817,16 @@ function getInputFunction(name, globals) {
         globals,
     ).callback;
 }
+
+test("manual hint shortcut is handled by the text input change path", () => {
+    const source = fs.readFileSync(
+        path.join(root, "components/feature/InputView.tsx"),
+        "utf8",
+    );
+    assert.match(source, /if \(char === " "\)/);
+    assert.match(source, /if \(lastKeyWasSpaceRef\.current\)/);
+    assert.match(source, /requestHint\(\)/);
+});
 
 test("actual manual hint callback reveals the full answer and records one answer event", () => {
     const typed = ["r", "e", "c", "i", "e", "v", "e"];
