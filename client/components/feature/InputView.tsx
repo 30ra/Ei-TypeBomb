@@ -313,6 +313,13 @@ function TypingAttempt({
         });
         lastKeyWasSpaceRef.current = false;
         setAnswerRevealed(true);
+
+        const hasIncorrectInput = input.some(
+            (char, index) => char !== "" && char !== english[index],
+        );
+        if (hasIncorrectInput) {
+            resetInput();
+        }
     };
 
 
@@ -370,7 +377,10 @@ function TypingAttempt({
             currentSelection < hintLength &&
             next[currentSelection] !== english[currentSelection];
 
-        if (typedInsideHint && !manualHints) {
+        if (
+            typedInsideHint &&
+            (!manualHints || answerRevealed)
+        ) {
             resetInput();
             return;
         }
