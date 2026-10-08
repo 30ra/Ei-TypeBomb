@@ -38,6 +38,7 @@ const fresh = (): GameState => ({
         bombHolder: 0,
         bombStatus: 0,
     },
+    revision: 0,
 });
 const start: GameEvent = {
     type: "game:start",
@@ -246,6 +247,54 @@ function assertReset(state: GameState) {
     assert.equal(state.wordAt, undefined);
     assert.equal(state.bombAt, undefined);
 }
+test("revision increments only when persistent game state changes", () => {
+    let state = fresh();
+    assert.equal(state.revision, 0);
+    const join = (id: string) =>
+        applyGameEvent(state, { type: "room:join", player: { id } }, {
+            now: 0, random: () => 0, rules: NODE_GAME_RULES,
+        });
+    state = join("a").state;
+    assert.equal(state.revision, 1);
+    state = join("a").state;
+    assert.equal(state.revision, 1);
+    state = join("b").state;
+    assert.equal(state.revision, 2);
+    const started = applyGameEvent(state, start, {
+        now: 0, random: () => 0, rules: NODE_GAME_RULES,
+    }).state;
+    assert.equal(started.revision, 3);
+    assert.equal(applyGameEvent(fresh(), start, {
+        now: 0, random: () => 0, rules: NODE_GAME_RULES,
+    }).state.revision, 0);
+    const early = applyGameEvent(started, { type: "deadline" }, {
+        now: 1, random: () => 0, rules: NODE_GAME_RULES,
+    }).state;
+    assert.equal(early.revision, 3);
+    const currentInput = applyGameEvent(started, {
+        type: "currentInput", playerId: started.room.users[started.room.bombHolder].id, input: "a",
+    }, { now: 1, random: () => 0, rules: NODE_GAME_RULES });
+    assert.equal(currentInput.state.revision, 3);
+    const active = applyGameEvent(started, { type: "deadline" }, {
+        now: started.wordAt!, random: () => 0, rules: NODE_GAME_RULES,
+    }).state;
+    assert.equal(active.revision, 4);
+    const holderId = active.room.users[active.room.bombHolder].id;
+    assert.equal(applyGameEvent(active, {
+        type: "word:success", playerId: "not-holder",
+    }, { now: 4000, random: () => 0, rules: NODE_GAME_RULES }).state.revision, 4);
+    const passed = applyGameEvent(active, {
+        type: "word:success", playerId: holderId,
+    }, { now: 4000, random: () => 0, rules: NODE_GAME_RULES }).state;
+    assert.equal(passed.revision, 5);
+    const left = applyGameEvent(passed, {
+        type: "room:leave", playerId: "a", reason: "room_leave",
+    }, { now: 4000, random: () => 0, rules: NODE_GAME_RULES }).state;
+    assert.equal(left.revision, 6);
+    assert.equal(applyGameEvent(left, {
+        type: "room:leave", playerId: "missing", reason: "room_leave",
+    }, { now: 4000, random: () => 0, rules: NODE_GAME_RULES }).state.revision, 6);
+});
 test("preserves existing runtime differences explicitly", () => {
     const state = fresh();
     state.room.users = [{ id: "a" }, { id: "b" }];
@@ -303,6 +352,8 @@ test("wire snapshot preserves legacy words and hides passwords and internal dead
     state.room.password = "secret";
     state.wordAt = 3000;
     const wire = roomSnapshot(state.room);
+    assert.equal(wire.revision, 0);
+    assert.equal(roomSnapshot(state.room, 7).revision, 7);
     assert.equal("password" in wire, false);
     assert.equal("wordAt" in wire, false);
     assert.deepEqual(

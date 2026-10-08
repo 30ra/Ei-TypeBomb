@@ -18,7 +18,8 @@ export class GameRoom extends DurableObject<WorkerEnv> {
 	constructor(ctx: DurableObjectState, env: WorkerEnv) {
 		super(ctx, env);
 		ctx.blockConcurrencyWhile(async () => {
-			this.game = await ctx.storage.get<GameState>('game');
+			const saved = await ctx.storage.get<GameState>('game');
+			if (saved) this.game = { ...saved, revision: saved.revision ?? 0 };
 		});
 	}
 	private send<K extends keyof ServerPayloads>(ws: WebSocket, event: K, data?: ServerPayloads[K]) {
@@ -35,7 +36,7 @@ export class GameRoom extends DurableObject<WorkerEnv> {
 	}
 	private snapshot() {
 		if (!this.game) return;
-		this.broadcast('room:broadcast', roomSnapshot(this.game.room));
+		this.broadcast('room:broadcast', roomSnapshot(this.game.room, this.game.revision));
 	}
 
 	private track(event: string, properties: Record<string, unknown> = {}) {
@@ -155,13 +156,13 @@ export class GameRoom extends DurableObject<WorkerEnv> {
 					const id = await verifyToken(response.jwtToken, this.env.JWT_SECRET);
 					if (!id || id !== session.roomId) throw new ClientError('認証トークンが無効または有効期限切れです。ルームに入り直してください。');
 					const displayName = response.displayName;
-					if (!this.game) this.game = { room: await getRoom(this.env, id) };
+					if (!this.game) this.game = { room: await getRoom(this.env, id), revision: 0 };
 					session.displayName = displayName;
 					session.authenticated = true;
 					session.lastSeen = Date.now();
 					ws.serializeAttachment(session);
 					const user = this.game.room.users.find((user) => user.id === session.id);
-					if (user) user.displayName = displayName;
+					if (user) this.apply({ type: 'player:rename', playerId: session.id, displayName });
 					this.track('room_authenticated');
 					await this.save();
 					this.snapshot();

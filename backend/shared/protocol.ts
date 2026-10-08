@@ -11,6 +11,7 @@ export type ClientPayloads = {
     ping: undefined;
 };
 export type WireRoom = Omit<Room, "password"> & {
+    revision: number;
     words: { jp: string; en: string }[];
 };
 export type ServerPayloads = {
@@ -35,10 +36,11 @@ export type ServerGameEvent = Packets<ServerPayloads>;
 export type EventHandlers<T> = {
     [K in keyof T]: T[K] extends undefined ? () => void : (data: T[K]) => void;
 };
-export function roomSnapshot(room: Room): WireRoom {
+export function roomSnapshot(room: Room, revision = 0): WireRoom {
     const { password: _password, ...publicRoom } = room;
     return {
         ...publicRoom,
+        revision,
         words: room.items.map((item) => ({ jp: item.prompt, en: item.answer })),
     };
 }

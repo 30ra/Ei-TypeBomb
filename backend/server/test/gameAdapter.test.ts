@@ -7,7 +7,7 @@ import type { GameState } from '../../shared/types';
 const fresh = (): GameState => ({ room: {
     id: 'room', users: [{ id: 'a' }, { id: 'b' }], items: [{ id: 'item', type: 'typed_recall', prompt: '猫', answer: 'cat' }],
     maxPlayers: 2, gameDuration: 1, isStart: false, bombStatus: 0, bombHolder: 0,
-} });
+}, revision: 0 });
 test('typing and ignored events retain room identity while forwarding input effects', t => {
     const state = fresh();
     state.room.isStart = true;

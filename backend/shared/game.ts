@@ -16,6 +16,7 @@ export type GameEvent =
           gameDuration: number;
       }
     | { type: "word:success"; playerId: string }
+    | { type: "player:rename"; playerId: string; displayName: string }
     | { type: "currentInput"; playerId: string; input: unknown }
     | { type: "deadline" };
 // Callers choose compatibility policies; the core has no runtime dependencies.
@@ -71,6 +72,7 @@ export function applyGameEvent(
     const effects: GameEffect[] = [];
     const next: GameState = {
         ...state,
+        revision: state.revision ?? 0,
         room: {
             ...state.room,
             users: state.room.users.map((user) => ({ ...user })),
@@ -87,7 +89,7 @@ export function applyGameEvent(
     const clearInput = () =>
         broadcast({ event: "typing:input", data: { input: "" } });
     const snapshot = () =>
-        broadcast({ event: "room:broadcast", data: roomSnapshot(room) });
+        broadcast({ event: "room:broadcast", data: roomSnapshot(room, next.revision) });
     const ignored = (): GameResult => ({ state, effects: [] });
     // Clamp injected entropy to guarantee valid indexes even at boundary values.
     const random = () =>
@@ -165,6 +167,13 @@ export function applyGameEvent(
             clearInput();
             activity("word_passed");
             break;
+        case "player:rename": {
+            const player = room.users.find((user) => user.id === event.playerId);
+            if (!player || player.displayName === event.displayName)
+                return ignored();
+            player.displayName = event.displayName;
+            break;
+        }
         case "currentInput":
             if (!isHolder(event.playerId) || typeof event.input !== "string")
                 return ignored();
@@ -206,6 +215,11 @@ export function applyGameEvent(
             break;
         }
     }
+    // Revision tracks persisted GameState changes, not emitted effects. This
+    // intentionally excludes currentInput, which returns above without mutation.
+    if (JSON.stringify({ ...next, revision: undefined }) !==
+        JSON.stringify({ ...state, revision: undefined }))
+        next.revision = (state.revision ?? 0) + 1;
     snapshot();
     return { state: next, effects };
 }
