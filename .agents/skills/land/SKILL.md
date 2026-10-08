@@ -1,9 +1,9 @@
 ---
 name: land
 description: >-
-  Land requested changes in the Ei-TypeBomb repository. Invoke only when the
-  user explicitly requests landing, merging, or choosing Land Changes; do not
-  invoke for review, preparation, passing checks, or skill installation alone.
+  Prepare and publish requested Ei-TypeBomb changes as a pull request only.
+  Invoke only when the user explicitly chooses Land Changes or asks to publish
+  a PR. Never merge as part of this workflow.
 disable-model-invocation: true
 metadata:
   delta-action: land
@@ -11,10 +11,10 @@ metadata:
 
 # Land Ei-TypeBomb changes
 
-Use this workflow only after an explicit user request to land the current
-changes. That request already authorizes the landing workflow; do not ask for
-the same permission again. Complete the landing and verify the result, or
-report clearly that it did not land and why.
+Use this workflow only after an explicit request to publish the current changes
+as a PR or to use Land Changes. That request authorizes committing, pushing,
+and opening/updating the PR, but **never authorizes merging**. Finish after
+verifying the PR exists, or report clearly why publication failed.
 
 ## Preflight
 
@@ -29,13 +29,16 @@ report clearly that it did not land and why.
    GitHub interface. Use `main` for ordinary feature work unless the user or
    repository configuration specifies otherwise. Use `production` only when
    that is the intended destination.
-4. Check `gh auth status`. Use the configured source remote (normally
-   `origin`), never the `local` backlink, for publication. If GitHub
-   authentication or access is unavailable, stop before publishing or
-   merging.
+4. Check `gh auth status` if using the GitHub CLI. If CLI authentication is
+   unavailable, use an authenticated GitHub integration that supports the
+   necessary operations and verification. Use the configured source remote
+   (normally `origin`), never the `local` backlink, for CLI publication.
+   If neither interface has sufficient access, stop before publishing.
 5. Create or use an issue-named feature branch such as
    `aoiihara/dev-472`. Preserve the existing branch if it already represents
    this change. Do not rewrite shared history or force-push.
+6. If the requested change is already implemented and there is no meaningful
+   diff to publish, do not create an empty commit or PR. Verify and report it.
 
 ## Verify locally
 
@@ -60,44 +63,35 @@ both backends. Run additional checks required by the actual changed code or
 repository settings. Do not treat local checks as a substitute for required
 PR checks.
 
-## Publish and review
+## Publish PR and stop
 
 1. Prepare a concise, accurate commit and PR description from the actual diff.
    Follow existing issue/branch context; do not invent issue IDs, test results,
    or human-authored text required by policy.
 2. Push the feature branch to the configured source remote and create or update
-   a PR using the installed GitHub tooling. The repository's recent history
-   shows PR merge commits; use a merge commit unless current repository
-   settings explicitly require a different strategy.
+   a PR using an authenticated GitHub interface. Target `main` by default;
+   target `production` only when explicitly intended.
 3. For a PR targeting `production`, apply exactly one of `Major`, `Minor`, or
-   `Patch`. `.github/workflows/validate-release-label.yml` enforces this for
-   production PRs, and `.github/workflows/release-tag.yml` creates the
-   corresponding release after merge.
-4. Inspect the PR's actual base, head SHA, review decision, required check
-   names, and applicable branch protection/merge queue. Obtain all required
-   reviews and ensure every required check has passed for the exact head being
-   landed. Use `gh pr checks <PR> --required` to inspect required checks; do
-   not merge while checks are pending, failing, missing, or unverifiable.
-5. If a check fails, investigate and fix the cause, then rerun relevant local
-   checks, publish the resulting head, and wait for the new head's required
-   checks. Never treat results from an earlier commit as approval.
+   `Patch`. `.github/workflows/validate-release-label.yml` enforces this.
+4. Inspect the final PR diff against its base branch. Confirm that all changed
+   files belong to the requested scope and no secrets, unrelated changes, or
+   unintended generated artifacts are included.
+5. Verify the PR URL, base, head branch, head SHA, and open state. Report the
+   available review and CI/check status accurately; pending or failing checks
+   are not grounds for merging or for claiming checks passed. Do not wait for
+   CI completion merely to finish this workflow.
+6. **Stop after PR creation or update. Never merge, enable auto-merge, enqueue
+   a merge, or modify the destination branch.** A separate explicit request
+   and workflow are required to merge.
 
 ## Resolve conflicts
 
 Resolve conflicts automatically only when the intended result is clear from
 the change, surrounding code, and project conventions. Preserve unrelated
-work. If intent is ambiguous, resolution risks data loss, or checks fail after
-resolution, stop and ask the user rather than guessing.
+work. If intent is ambiguous or resolution risks data loss, stop and ask.
 
-## Merge and confirm
+## Confirm PR publication
 
-Once all required reviews and checks have passed for the current PR head, merge
-using GitHub's merge-commit strategy (`gh pr merge <PR> --merge`). Do not use
-`--admin`, bypass branch protections, or force a merge. Honor any merge queue
-required by the destination branch.
-
-Afterward, verify that GitHub marks the PR merged and identify its merge commit
-and destination branch. Fetch the destination branch from the configured source
-remote and verify the merge commit is reachable from it. Report completion
-only after confirming the landing; otherwise state that the change did not
-land and describe the blocker.
+Confirm the PR is open on GitHub with the intended base and head. Report its
+URL, changed scope, tests run, and any outstanding checks or reviews.
+**PR publication is the final step; do not merge the PR.**
