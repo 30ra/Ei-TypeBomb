@@ -88,7 +88,7 @@ const createRoomIfNeeded = (roomId: string): Promise<Room | null> => {
         rooms.push(newRoom);
         games.set(
             roomId,
-            new NodeGameAdapter({ room: newRoom }, (result, previous) => {
+            new NodeGameAdapter({ room: newRoom, revision: 0 }, (result, previous) => {
                 if (result.state.room !== previous.room) {
                     const index = rooms.findIndex((item) => item.id === roomId);
                     if (index === -1) return;
@@ -152,7 +152,10 @@ const sendRoomInfo = (roomId: string | null) => {
     if (!roomId) return;
     const room = rooms.find((item) => item.id === roomId);
     if (!room) return;
-    io.to(roomId).emit("room:broadcast", roomSnapshot(room));
+    io.to(roomId).emit(
+        "room:broadcast",
+        roomSnapshot(room, games.get(roomId)?.state.revision ?? 0),
+    );
 };
 
 io.on("connection", (socket) => {

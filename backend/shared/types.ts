@@ -25,4 +25,9 @@ export type Room = {
     bombStatus: number;
 };
 // Serializable deadlines in epoch milliseconds. Transport IDs are opaque player IDs.
-export type GameState = { room: Room; wordAt?: number; bombAt?: number };
+export type GameState = {
+    room: Room;
+    wordAt?: number;
+    bombAt?: number;
+    revision: number;
+};

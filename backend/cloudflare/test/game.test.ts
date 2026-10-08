@@ -307,7 +307,7 @@ it('Node and Durable Object adapters produce identical states for the same game 
 		id: roomId, maxPlayers: 2, gameDuration: 20,
 		items: [0, 1, 2].map(id => ({ id: String(id), type: 'typed_recall', prompt: '猫', answer: 'cat' })),
 		users: [], isStart: false, bombHolder: 0, bombStatus: 0,
-	} };
+	}, revision: 0 };
 	// Keep real runtime alarms/timers in the future; advance the core's injected clock.
 	let now = Date.now() + 3_600_000;
 	vi.spyOn(Math, 'random').mockReturnValue(0);
@@ -354,4 +354,33 @@ it('Node and Durable Object adapters produce identical states for the same game 
 	} finally {
 		node.dispose();
 	}
+});
+
+it('restores stored revisions and defaults legacy snapshots to revision zero', async () => {
+	const stub = env.GAME_ROOMS.getByName(roomId);
+	const oldState = {
+		room: {
+			id: roomId, maxPlayers: 2, gameDuration: 20, items: [],
+			users: [], isStart: false, bombHolder: 0, bombStatus: 0,
+		},
+		wordAt: undefined,
+		bombAt: undefined,
+	};
+	await runInDurableObject(stub, async (_, ctx) => {
+		await ctx.storage.put('game', oldState);
+	});
+	await evictDurableObject(stub);
+	const legacyLoaded = await runInDurableObject(stub, instance =>
+		(instance as unknown as { game: GameState }).game,
+	);
+	expect(legacyLoaded.revision).toBe(0);
+	await runInDurableObject(stub, async (instance) => {
+		(instance as unknown as { game: GameState }).game.revision = 12;
+		await (instance as unknown as { save(): Promise<void> }).save();
+	});
+	await evictDurableObject(stub);
+	const restored = await runInDurableObject(stub, instance =>
+		(instance as unknown as { game: GameState }).game,
+	);
+	expect(restored.revision).toBe(12);
 });
