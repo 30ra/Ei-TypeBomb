@@ -60,7 +60,7 @@ Important state includes:
 - `bombHolder` — index of the player currently holding the bomb
 - `wordIndex` — current word
 - `bombStatus` — current bomb state
-- `bombTimer` — timer controlling the bomb
+- `bombAt` / `wordAt` — absolute deadlines for bomb phases and the initial word
 - `users` — players currently participating in the game
 
 A unique `gameId` is generated when a game starts.
@@ -272,15 +272,16 @@ Ei-TypeBomb/
 │   ├── lib/
 │   └── type/
 │
-├── server/
-│   └── src/
-│       ├── index.ts
-│       ├── lib/
-│       └── type.ts
+├── backend/
+│   ├── server/        # Node.js / Socket.IO / PostgreSQL
+│   ├── cloudflare/    # Workers / Native WebSocket / Durable Objects
+│   └── shared/        # Runtime-independent game core and protocol
 │
 └── docs/
     └── screenshots/
 ```
+
+Backend build, test, and deployment instructions: [backend/README.md](backend/README.md).
 
 ## How to Play
 

@@ -2,7 +2,7 @@ import "server-only";
 import { z } from "zod";
 import { Prompts } from "@posthog/ai";
 import { gemini, posthog } from "./gemini";
-import { Word } from "@/type";
+import type { LegacyWord } from "@/type";
 
 const prompts = new Prompts({ posthog });
 const defaultModel = "gemini-3.5-flash-lite";
@@ -93,5 +93,5 @@ export async function generateWords(theme: string) {
         })
         .parse(parsed);
 
-    return result.words as Word[];
+    return result.words as LegacyWord[];
 }
