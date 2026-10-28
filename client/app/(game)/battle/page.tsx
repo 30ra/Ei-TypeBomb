@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import Bomb from "@/components/feature/Bomb";
 import Button from "@/components/ui/Button";
+import ItemView from "@/components/feature/ItemView";
+import type { RecallObservation } from "@/lib/playground/memory";
 
 import { getBattleWords } from "@/lib/room/battleWords";
 
@@ -30,46 +32,46 @@ export default function BattlePreview() {
     const [turn, setTurn] = useState(0);
     const [slot, setSlot] = useState(0);
     const [wordNumber, setWordNumber] = useState(0);
-    const [answer, setAnswer] = useState("");
+    const hintUsedRef = useRef(false);
+    const [presentationKey, setPresentationKey] = useState(0);
     const [mode, setMode] = useState<"normal" | "counter">("normal");
     const [noHintStreak, setNoHintStreak] = useState(0);
     const [countersUsed, setCountersUsed] = useState(0);
     const [incoming, setIncoming] = useState<string[]>([]);
     const [outgoing, setOutgoing] = useState<string[]>([]);
-    const [hintUsed, setHintUsed] = useState(false);
-    const [showHint, setShowHint] = useState(false);
     const [message, setMessage] = useState("5単語正解するとターン交代");
     const [hit, setHit] = useState<Hit | null>(null);
     const [winner, setWinner] = useState<number | null>(null);
     const hitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const word = words[wordNumber % words.length];
-    const counterReady = noHintStreak >= 1 && countersUsed < 3 && incoming.length > 0;
+    const counterReady = noHintStreak >= 2 && countersUsed < 3 && incoming.length > 0;
     const counterWord = incoming[0];
     const target = mode === "counter" ? counterWord : word.answer;
-    const prompt = mode === "counter" ? "相手の攻撃を打ち返そう" : word.prompt;
+    const activeItem = { id: `battle-${wordNumber}-${mode}`, type: "typed_recall" as const, prompt: mode === "counter" ? "カウンター" : word.prompt, answer: target };
+    const onRecallComplete = (observation: RecallObservation) => {
+        hintUsedRef.current = observation.hintCount > 0 || observation.finalCueRatio > 0;
+    };
+    const changeMode = (next: "normal" | "counter") => {
+        setMode(next);
+        hintUsedRef.current = false;
+        setPresentationKey((key) => key + 1);
+    };
 
     useEffect(() => () => { if (hitTimer.current) clearTimeout(hitTimer.current); }, []);
 
     function reset() {
         setPlayers(initialPlayers()); setTurn(0); setSlot(0); setWordNumber(0);
-        setAnswer(""); setMode("normal"); setNoHintStreak(0); setCountersUsed(0);
-        setIncoming([]); setOutgoing([]); setHintUsed(false); setShowHint(false);
+        setMode("normal"); setNoHintStreak(0); setCountersUsed(0);
+        setIncoming([]); setOutgoing([]); hintUsedRef.current = false; setPresentationKey((key) => key + 1);
         setMessage("5単語正解するとターン交代"); setHit(null); setWinner(null);
         if (hitTimer.current) clearTimeout(hitTimer.current);
     }
 
-    function submit(event: React.FormEvent<HTMLFormElement>) {
-        event.preventDefault();
+    function submit() {
         if (winner !== null) return;
+        const hintUsed = hintUsedRef.current;
         if (mode === "counter" && (!counterReady || hintUsed)) {
             setMessage("カウンターには連続ヒントなし正解が必要です");
-            return;
-        }
-        if (answer !== target) {
-            setPlayers((prev) => prev.map((p, i) => i === turn ? { ...p, combo: 0 } : p) as [Player, Player]);
-            setNoHintStreak(0);
-            setMessage("不正解：コンボが途切れました");
-            setAnswer("");
             return;
         }
         const other = 1 - turn;
@@ -88,7 +90,7 @@ export default function BattlePreview() {
         setMessage(mode === "counter" ? `カウンター！ -${damage} / HP+${healed}` : `${combo} COMBO！ -${damage} HP`);
         const sent = [...outgoing, target];
         const nextIncoming = mode === "counter" ? incoming.slice(1) : incoming;
-        setAnswer(""); setHintUsed(false); setShowHint(false); setMode("normal");
+        hintUsedRef.current = false; setMode("normal"); setPresentationKey((key) => key + 1);
         if (mode !== "counter") setWordNumber((n) => n + 1);
         if (hp === 0) { setWinner(turn); return; }
         if (slot === 4) {
@@ -128,17 +130,22 @@ export default function BattlePreview() {
             <div className="rounded-2xl bg-(--color-background-secondary) p-5 flex flex-col items-center gap-4">
                 {winner !== null ? <h2 className="text-2xl font-bold">プレイヤー{winner + 1}の勝利！</h2> : <>
                     <p className="font-bold">プレイヤー{turn + 1}のターン ・ {slot + 1}/5単語</p>
-                    <p className="text-xl font-bold">{prompt}</p>
                     <div className="flex gap-3 w-full max-w-sm">
-                        <button className={`rounded-lg px-4 py-2 font-bold flex-1 ${mode === "normal" ? "bg-cyan-600 text-white" : "bg-(--color-background)"}`} onClick={() => { setMode("normal"); setAnswer(""); setHintUsed(false); setShowHint(false); }}>通常攻撃</button>
-                        <button disabled={!counterReady} className={`rounded-lg px-4 py-2 font-bold flex-1 disabled:opacity-40 ${mode === "counter" ? "bg-cyan-600 text-white" : "bg-(--color-background)"}`} onClick={() => { setMode("counter"); setAnswer(""); setHintUsed(false); setShowHint(false); }}>カウンター {countersUsed}/3</button>
+                        <button className={`rounded-lg px-4 py-2 font-bold flex-1 ${mode === "normal" ? "bg-cyan-600 text-white" : "bg-(--color-background)"}`} onClick={() => changeMode("normal")}>通常攻撃</button>
+                        <button disabled={!counterReady} className={`rounded-lg px-4 py-2 font-bold flex-1 disabled:opacity-40 ${mode === "counter" ? "bg-cyan-600 text-white" : "bg-(--color-background)"}`} onClick={() => changeMode("counter")}>カウンター {countersUsed}/3</button>
                     </div>
-                    <form onSubmit={submit} className="w-full max-w-sm flex flex-col gap-3">
-                        <input autoComplete="off" autoCapitalize="off" spellCheck={false} value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="英単語を入力" className="rounded-lg bg-(--color-background) border border-(--color-border) px-4 py-3 w-full text-center font-mono" aria-label="英単語を入力"/>
-                        <Button type="submit" variant="primary">攻撃する</Button>
-                    </form>
-                    {mode === "normal" && <button className="text-sm underline opacity-70" onClick={() => { setShowHint(true); setHintUsed(true); }}>ヒントを見る</button>}
-                    {showHint && <p className="font-mono text-sm">{word.answer}</p>}
+                    <div className="w-full flex justify-center">
+                        <ItemView
+                            key={`${presentationKey}-${turn}-${slot}-${mode}`}
+                            item={activeItem}
+                            currentInput={null}
+                            bombStatus={0}
+                            enableRemoteTypingSync={false}
+                            onSuccess={submit}
+                            onChangeInput={() => {}}
+                            onRecallComplete={onRecallComplete}
+                        />
+                    </div>
                     <p className="text-sm text-center" role="status">{message}</p>
                 </>}
             </div>
