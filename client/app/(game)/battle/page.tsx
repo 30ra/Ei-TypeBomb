@@ -4,24 +4,28 @@ import { useEffect, useRef, useState } from "react";
 import Bomb from "@/components/feature/Bomb";
 import Button from "@/components/ui/Button";
 
-const WORDS = [
-    { prompt: "りんご", answer: "apple" },
-    { prompt: "電車", answer: "train" },
-    { prompt: "海", answer: "ocean" },
-    { prompt: "学校", answer: "school" },
-    { prompt: "未来", answer: "future" },
-    { prompt: "橋", answer: "bridge" },
-    { prompt: "光", answer: "light" },
-    { prompt: "音楽", answer: "music" },
-    { prompt: "星", answer: "star" },
-    { prompt: "世界", answer: "world" },
-];
+import { getBattleWords } from "@/lib/room/battleWords";
+
+type Word = { prompt: string; answer: string };
 type Player = { hp: number; combo: number };
 type Hit = { target: number; damage: number; word: string };
 const initialPlayers = (): [Player, Player] => [{ hp: 100, combo: 0 }, { hp: 100, combo: 0 }];
 
 /** Local two-player prototype; no socket events or multiplayer synchronization yet. */
 export default function BattlePreview() {
+    const [words, setWords] = useState<Word[]>([]);
+    const [roomTitle, setRoomTitle] = useState("");
+    const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState(false);
+    useEffect(() => {
+        let active = true;
+        getBattleWords().then((result) => {
+            if (!active) return;
+            if (!result || result.words.length === 0) setLoadError(true);
+            else { setWords(result.words); setRoomTitle(result.title); }
+        }).catch(() => { if (active) setLoadError(true); }).finally(() => { if (active) setLoading(false); });
+        return () => { active = false; };
+    }, []);
     const [players, setPlayers] = useState<[Player, Player]>(initialPlayers);
     const [turn, setTurn] = useState(0);
     const [slot, setSlot] = useState(0);
@@ -38,7 +42,7 @@ export default function BattlePreview() {
     const [hit, setHit] = useState<Hit | null>(null);
     const [winner, setWinner] = useState<number | null>(null);
     const hitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const word = WORDS[wordNumber % WORDS.length];
+    const word = words[wordNumber % words.length];
     const counterReady = noHintStreak >= 1 && countersUsed < 3 && incoming.length > 0;
     const counterWord = incoming[0];
     const target = mode === "counter" ? counterWord : word.answer;
@@ -85,7 +89,7 @@ export default function BattlePreview() {
         const sent = [...outgoing, target];
         const nextIncoming = mode === "counter" ? incoming.slice(1) : incoming;
         setAnswer(""); setHintUsed(false); setShowHint(false); setMode("normal");
-        setWordNumber((n) => n + 1);
+        if (mode !== "counter") setWordNumber((n) => n + 1);
         if (hp === 0) { setWinner(turn); return; }
         if (slot === 4) {
             setTurn(other); setSlot(0); setNoHintStreak(0); setCountersUsed(0);
@@ -98,10 +102,12 @@ export default function BattlePreview() {
         }
     }
 
+    if (loading) return <main className="p-8">単語リストを読み込み中…</main>;
+    if (loadError || words.length === 0) return <main className="p-8">単語リストを読み込めませんでした。先にルームを選択してください。</main>;
     return (
         <main className="w-full max-w-3xl px-4 py-8 flex flex-col gap-5">
             <div className="flex justify-between items-center gap-3">
-                <div><h1 className="text-3xl font-bold">Ei-TypeBattle</h1><p className="opacity-60 text-sm">ローカル2人対戦プレビュー</p></div>
+                <div><h1 className="text-3xl font-bold">Ei-TypeBattle</h1><p className="opacity-60 text-sm">ローカル2人対戦プレビュー ・ {roomTitle}（{words.length}単語）</p></div>
                 <div className="w-32"><Button onClick={reset}>最初から</Button></div>
             </div>
             <div className="grid grid-cols-2 gap-3">
