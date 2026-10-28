@@ -342,3 +342,29 @@ body {
         animation: none;
     }
 }
+
+/* Ei-TypeBattle: reuse the existing Bomb SVG and ETB motion timings. */
+.battle-bomb-projectile {
+    position: absolute;
+    top: 38%;
+    left: 50%;
+    pointer-events: none;
+    animation-duration: 700ms;
+    animation-timing-function: var(--ease-etb-game, ease-out);
+    animation-fill-mode: both;
+}
+.battle-bomb-to-right { animation-name: battleBombRight; }
+.battle-bomb-to-left { animation-name: battleBombLeft; }
+@keyframes battleBombRight {
+    0% { transform: translate(-140px, 12px) rotate(-30deg) scale(1); opacity: 1; }
+    50% { transform: translate(0, -35px) rotate(140deg) scale(1.3); opacity: 1; }
+    100% { transform: translate(140px, 12px) rotate(360deg) scale(0.5); opacity: 0; }
+}
+@keyframes battleBombLeft {
+    0% { transform: translate(140px, 12px) rotate(30deg) scale(1); opacity: 1; }
+    50% { transform: translate(0, -35px) rotate(-140deg) scale(1.3); opacity: 1; }
+    100% { transform: translate(-140px, 12px) rotate(-360deg) scale(0.5); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .battle-bomb-projectile { animation: none; opacity: 0; }
+}
