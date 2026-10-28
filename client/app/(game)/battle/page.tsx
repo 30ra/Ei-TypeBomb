@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import Bomb from "@/components/feature/Bomb";
 import Button from "@/components/ui/Button";
 import ItemView from "@/components/feature/ItemView";
-import type { RecallObservation } from "@/lib/playground/memory";
+import { evaluateRecall, type RecallObservation } from "@/lib/playground/memory";
+import { createScheduler, chooseNextUserItem, recordUserAnswer, type SchedulerState } from "@/lib/playground/scheduler";
 
 import { getBattleWords } from "@/lib/room/battleWords";
 
@@ -24,14 +25,22 @@ export default function BattlePreview() {
         getBattleWords().then((result) => {
             if (!active) return;
             if (!result || result.words.length === 0) setLoadError(true);
-            else { setWords(result.words); setRoomTitle(result.title); }
+            else { setWords(result.words); setRoomTitle(result.title); const scheduler = createScheduler(result.words.map((_, index) => String(index))); schedulerRef.current = scheduler; const first = chooseNextUserItem(scheduler); setSelectedIndex(first ? Number(first.itemId) : null); }
         }).catch(() => { if (active) setLoadError(true); }).finally(() => { if (active) setLoading(false); });
         return () => { active = false; };
     }, []);
     const [players, setPlayers] = useState<[Player, Player]>(initialPlayers);
     const [turn, setTurn] = useState(0);
     const [slot, setSlot] = useState(0);
-    const [wordNumber, setWordNumber] = useState(0);
+    const schedulerRef = useRef<SchedulerState | null>(null);
+    const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+    const observationRef = useRef<RecallObservation | null>(null);
+    const pickNextWord = () => {
+        const scheduler = schedulerRef.current;
+        if (!scheduler) return;
+        const next = chooseNextUserItem(scheduler);
+        setSelectedIndex(next ? Number(next.itemId) : null);
+    };
     const hintUsedRef = useRef(false);
     const [presentationKey, setPresentationKey] = useState(0);
     const [mode, setMode] = useState<"normal" | "counter">("normal");
@@ -43,12 +52,13 @@ export default function BattlePreview() {
     const [hit, setHit] = useState<Hit | null>(null);
     const [winner, setWinner] = useState<number | null>(null);
     const hitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const word = words[wordNumber % words.length];
+    const word = words[selectedIndex ?? 0];
     const counterReady = noHintStreak >= 2 && countersUsed < 3 && incoming.length > 0;
     const counterWord = incoming[0];
     const target = mode === "counter" ? counterWord : word.answer;
-    const activeItem = { id: `battle-${wordNumber}-${mode}`, type: "typed_recall" as const, prompt: mode === "counter" ? "カウンター" : word.prompt, answer: target };
+    const activeItem = { id: `battle-${selectedIndex}-${mode}`, type: "typed_recall" as const, prompt: mode === "counter" ? "カウンター" : word.prompt, answer: target };
     const onRecallComplete = (observation: RecallObservation) => {
+        observationRef.current = observation;
         hintUsedRef.current = observation.hintCount > 0 || observation.finalCueRatio > 0;
     };
     const changeMode = (next: "normal" | "counter") => {
@@ -60,7 +70,9 @@ export default function BattlePreview() {
     useEffect(() => () => { if (hitTimer.current) clearTimeout(hitTimer.current); }, []);
 
     function reset() {
-        setPlayers(initialPlayers()); setTurn(0); setSlot(0); setWordNumber(0);
+        setPlayers(initialPlayers()); setTurn(0); setSlot(0);
+        schedulerRef.current = createScheduler(words.map((_, index) => String(index)));
+        pickNextWord(); observationRef.current = null;
         setMode("normal"); setNoHintStreak(0); setCountersUsed(0);
         setIncoming([]); setOutgoing([]); hintUsedRef.current = false; setPresentationKey((key) => key + 1);
         setMessage("5単語正解するとターン交代"); setHit(null); setWinner(null);
@@ -91,7 +103,13 @@ export default function BattlePreview() {
         const sent = [...outgoing, target];
         const nextIncoming = mode === "counter" ? incoming.slice(1) : incoming;
         hintUsedRef.current = false; setMode("normal"); setPresentationKey((key) => key + 1);
-        if (mode !== "counter") setWordNumber((n) => n + 1);
+        if (mode !== "counter") {
+            if (schedulerRef.current?.current && observationRef.current) {
+                recordUserAnswer(schedulerRef.current, evaluateRecall(observationRef.current));
+            }
+            pickNextWord();
+        }
+        observationRef.current = null;
         if (hp === 0) { setWinner(turn); return; }
         if (slot === 4) {
             setTurn(other); setSlot(0); setNoHintStreak(0); setCountersUsed(0);
@@ -105,7 +123,7 @@ export default function BattlePreview() {
     }
 
     if (loading) return <main className="p-8">単語リストを読み込み中…</main>;
-    if (loadError || words.length === 0) return <main className="p-8">単語リストを読み込めませんでした。先にルームを選択してください。</main>;
+    if (loadError || words.length === 0 || selectedIndex === null) return <main className="p-8">単語リストを読み込めませんでした。先にルームを選択してください。</main>;
     return (
         <main className="w-full max-w-3xl px-4 py-8 flex flex-col gap-5">
             <div className="flex justify-between items-center gap-3">
