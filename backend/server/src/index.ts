@@ -278,27 +278,28 @@ io.on("connection", (socket) => {
     const sendBattle = () => {
         if (!roomId) return;
         const snapshot = battleSnapshot(roomId);
-        if (snapshot) io.to(roomId).emit("battle:state", snapshot);
+        if (snapshot) (io.to(roomId).emit as (event: string, payload: unknown) => boolean)("battle:state", snapshot);
     };
-    socket.on("battle:join", () => {
+    const battleOn = socket.on.bind(socket) as (event: string, callback: (payload: any) => void) => void;
+    battleOn("battle:join", () => {
         if (!roomId) return;
         const room = rooms.find(item => item.id === roomId);
         if (!room) return;
         if (!joinBattle(roomId, room.items, user.id, user.displayName ?? "Player")) {
-            socket.emit("battle:error", "対戦ルームが満員、または試合中です。");
+            (socket.emit as (event: string, payload: unknown) => boolean)("battle:error", "対戦ルームが満員、または試合中です。");
             return;
         }
         sendBattle();
     });
-    socket.on("battle:start", () => {
+    battleOn("battle:start", () => {
         if (!roomId || !startBattle(roomId, user.id)) return;
         sendBattle();
     });
-    socket.on("battle:answer", (payload: unknown) => {
+    battleOn("battle:answer", (payload: unknown) => {
         if (!roomId || !answerBattle(roomId, user.id, payload)) return;
         sendBattle();
     });
-    socket.on("battle:leave", () => {
+    battleOn("battle:leave", () => {
         if (!roomId) return;
         leaveBattle(roomId, user.id);
         sendBattle();
