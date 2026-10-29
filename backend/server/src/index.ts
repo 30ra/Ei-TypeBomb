@@ -32,6 +32,7 @@ import {
     type EventHandlers,
 } from "../../shared/protocol";
 import { NodeGameAdapter, NODE_GAME_RULES } from "./lib/gameAdapter";
+import { joinBattle, startBattle, answerBattle, leaveBattle, battleSnapshot } from "./lib/battleSession";
 
 const games = new Map<string, NodeGameAdapter>();
 
@@ -274,6 +275,35 @@ io.on("connection", (socket) => {
         },
     );
 
+    const sendBattle = () => {
+        if (!roomId) return;
+        const snapshot = battleSnapshot(roomId);
+        if (snapshot) io.to(roomId).emit("battle:state", snapshot);
+    };
+    socket.on("battle:join", () => {
+        if (!roomId) return;
+        const room = rooms.find(item => item.id === roomId);
+        if (!room) return;
+        if (!joinBattle(roomId, room.items, user.id, user.displayName ?? "Player")) {
+            socket.emit("battle:error", "対戦ルームが満員、または試合中です。");
+            return;
+        }
+        sendBattle();
+    });
+    socket.on("battle:start", () => {
+        if (!roomId || !startBattle(roomId, user.id)) return;
+        sendBattle();
+    });
+    socket.on("battle:answer", (payload: unknown) => {
+        if (!roomId || !answerBattle(roomId, user.id, payload)) return;
+        sendBattle();
+    });
+    socket.on("battle:leave", () => {
+        if (!roomId) return;
+        leaveBattle(roomId, user.id);
+        sendBattle();
+    });
+
     socket.on("currentInput", (input: unknown) => {
         getGame()?.apply({ type: "currentInput", playerId: user.id, input });
     });
@@ -341,6 +371,7 @@ io.on("connection", (socket) => {
             displayName: user.displayName,
             roomId,
         });
+        if (roomId) { leaveBattle(roomId, user.id); sendBattle(); }
         deleteUser(user.id, "disconnect");
     });
 });
