@@ -1,9 +1,10 @@
 import type { Item } from "../../../shared/types";
 import { applyBattleAction, createBattle, type BattleState } from "../../../shared/battleGame";
-import { createScheduler, chooseNextUserItem, recordUserAnswer, type SchedulerState } from "../../../shared/scheduler";
+import { createScheduler, chooseNextUserItem, recordUserAnswer, type SchedulerState, type ItemMemoryState } from "../../../shared/scheduler";
+import { evaluateRecall, type RecallObservation } from "../../../shared/recallEvaluation";
 
 type Player = { id: string; name: string };
-type Session = { players: Player[]; battle: BattleState | null; deck: Item[]; scheduler: SchedulerState; revision: number };
+type Session = { players: Player[]; battle: BattleState | null; deck: Item[]; scheduler: SchedulerState; memories: Record<string, Record<string, ItemMemoryState>>; revision: number };
 export type PublicBattle = {
     players: { id: string; name: string; hp: number; combo: number }[];
     currentPlayerId: string | null;
@@ -22,7 +23,7 @@ const get = (roomId: string, items: Item[]) => {
     let session = sessions.get(roomId);
     if (!session) {
         const deck = items.filter(item => item.type === "typed_recall" && item.answer.trim());
-        session = { players: [], battle: null, deck, scheduler: createScheduler(deck.map((_, index) => String(index))), revision: 0 };
+        session = { players: [], battle: null, deck, scheduler: createScheduler(deck.map((_, index) => String(index))), memories: {}, revision: 0 };
         sessions.set(roomId, session);
     }
     return session;
@@ -39,7 +40,7 @@ export function joinBattle(roomId: string, items: Item[], id: string, name: stri
 export function startBattle(roomId: string, id: string) {
     const session = sessions.get(roomId);
     if (!session || session.battle || session.players.length !== 2 || session.players[0].id !== id || session.deck.length === 0) return false;
-    const first = chooseNextUserItem(session.scheduler);
+    const first = chooseNextUserItem(session.scheduler, session.memories[id] ?? {});
     if (!first) return false;
     session.battle = createBattle([session.players[0].id, session.players[1].id], session.deck[Number(first.itemId)]);
     session.revision++;
@@ -63,11 +64,29 @@ export function answerBattle(roomId: string, id: string, payload: unknown) {
     session.battle = result.state;
     if (data.mode === "normal" && current) {
         // Client hint and timing reports are untrusted; do not infer mastery.
-        recordUserAnswer(session.scheduler, {
-            retryNeed: "confirm", reason: "uncertain_recall", independent: false,
-        });
+        // Client-reported speed and hints are not trusted as proof of mastery.
+        // Use the original evaluation model with a conservative observation.
+        const observation: RecallObservation = {
+            success: true, answerLength: battle.question.answer.length,
+            firstAttemptCorrect: false, revealedHintChars: 0, hintCount: 0,
+            attemptCount: 2, incorrectInputCount: 1,
+            elapsedMs: 12000, recallLatencyMs: null,
+            elapsedSincePresentationMs: 0,
+        };
+        const evaluation = evaluateRecall(observation);
+        recordUserAnswer(session.scheduler, evaluation);
+        const previous = session.memories[id]?.[current.itemId];
+        const now = new Date().toISOString();
+        // No long-term mastery gain without independently verified recall telemetry.
+        session.memories[id] ??= {};
+        session.memories[id][current.itemId] = {
+            stability: previous?.stability ?? 0.15,
+            difficulty: previous?.difficulty ?? 5,
+            reviewCount: (previous?.reviewCount ?? 0) + 1,
+            lastReviewedAt: previous?.lastReviewedAt ?? null,
+        };
         if (result.state.status === "playing") {
-            const next = chooseNextUserItem(session.scheduler);
+            const next = chooseNextUserItem(session.scheduler, session.memories[result.state.currentPlayerId] ?? {});
             if (next) session.battle = { ...result.state, question: session.deck[Number(next.itemId)] };
         }
     }
