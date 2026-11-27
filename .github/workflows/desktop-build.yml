@@ -1,0 +1,40 @@
+name: Build desktop installers
+on:
+  push:
+    branches: [tauri-official-build]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundle: nsis
+            extension: exe
+          - os: macos-latest
+            target: universal-apple-darwin
+            bundle: dmg
+            extension: dmg
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: rustup update stable
+      - run: rustup default stable
+      - if: runner.os == 'macOS'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - run: npx --yes --package @tauri-apps/cli@2 tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundle }} -- --locked
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Ei-TypeBomb-${{ matrix.target }}
+          path: desktop/src-tauri/target/${{ matrix.target }}/release/bundle/${{ matrix.bundle }}/*.${{ matrix.extension }}
+          if-no-files-found: error

@@ -326,3 +326,7 @@ the editor's TypeScript language server after installation if the diagnostics re
 ## License
 
 This project is licensed under the MIT License.
+
+## Desktop app
+
+See [Tauri desktop setup](desktop/README.md) for development and packaging instructions.

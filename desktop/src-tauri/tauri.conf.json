@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Ei-TypeBomb",
+  "version": "0.1.0",
+  "identifier": "com.ei-typebomb.desktop",
+  "app": {
+    "windows": [],
+    "withGlobalTauri": false,
+    "security": {
+      "capabilities": []
+    }
+  },
+  "bundle": {
+    "active": true,
+    "licenseFile": "../../LICENSE",
+    "shortDescription": "Ei-TypeBomb multiplayer typing game",
+    "targets": ["deb", "dmg", "nsis"],
+    "icon": ["icons/icon.png", "icons/icon.ico", "icons/icon.icns"],
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/share/doc/ei-type-bomb/copyright": "../../LICENSE"
+        }
+      }
+    }
+  }
+}
