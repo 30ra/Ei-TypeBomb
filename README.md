@@ -1,6 +1,6 @@
-# Ei-TypeBomb
+# Ei-TypeBattle
 
-Ei-TypeBomb is a real-time multiplayer typing game built with Next.js, Node.js, and Socket.IO.
+Ei-TypeBattle is a fork of [Ei-TypeBomb](https://github.com/aoi-ihara/Ei-TypeBomb). It is a real-time multiplayer typing game built with Next.js, Node.js, and Socket.IO.
 
 Players join a shared room and pass a virtual bomb by correctly typing the displayed English word. The game is designed around a simple real-time game loop, with the server managing the game state and clients rendering the current state.
 
@@ -21,7 +21,7 @@ Players join a shared room and pass a virtual bomb by correctly typing the displ
 
 ## Architecture
 
-Ei-TypeBomb consists of a Next.js client and a Node.js server communicating through Socket.IO.
+Ei-TypeBattle consists of a Next.js client and a Node.js server communicating through Socket.IO.
 
 ```text
 ┌─────────────────────┐
@@ -69,7 +69,7 @@ Asynchronous timers check the current `gameId` before modifying the room. This p
 
 ## Room Management
 
-Ei-TypeBomb distinguishes between Socket.IO room membership and game-room membership.
+Ei-TypeBattle distinguishes between Socket.IO room membership and game-room membership.
 
 A socket can remain connected to the Socket.IO room while its player is removed from the current game.
 
@@ -263,7 +263,7 @@ This makes it possible to trace game and server events when debugging production
 ## Project Structure
 
 ```text
-Ei-TypeBomb/
+Ei-TypeBattle/
 ├── frontend/
 │   ├── app/
 │   │   ├── (editor)/

@@ -3,6 +3,7 @@
 import Image from "next/image";
 import React from "react";
 import Link from "next/link";
+import { PRODUCT_NAME } from "@/lib/config/product";
 
 export default function Header({ children }: { children?: React.ReactNode }) {
     return (
@@ -20,7 +21,7 @@ export default function Header({ children }: { children?: React.ReactNode }) {
                             />
                             <Image
                                 src="/icon-light.png"
-                                alt="ETB"
+                                alt=""
                                 className="rounded-lg"
                                 width={36}
                                 height={36}
@@ -29,8 +30,8 @@ export default function Header({ children }: { children?: React.ReactNode }) {
                         <span className="min-w-0 truncate font-extrabold text-xl">
                             {process.env.NEXT_PUBLIC_BETA_ENVIRONMENT! ===
                             "true"
-                                ? "ETB Beta"
-                                : "ETB"}
+                                ? `${PRODUCT_NAME} Beta`
+                                : PRODUCT_NAME}
                         </span>
                     </Link>
                 </div>

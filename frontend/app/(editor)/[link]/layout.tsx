@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { PRODUCT_NAME } from "@/lib/config/product";
 import { getRoomForEditFromLink } from "@/lib/room/get";
 
 const DEFAULT_DESCRIPTION =
@@ -16,7 +17,8 @@ export async function generateMetadata({
         return {};
     }
 
-    const title = room.title?.trim() ? `${room.title.trim()} - ETB` : "ETB";
+    const roomTitle = room.title?.trim();
+    const title = roomTitle ? `${roomTitle} - ${PRODUCT_NAME}` : PRODUCT_NAME;
     const description = room.explanation?.trim() || DEFAULT_DESCRIPTION;
 
     return {

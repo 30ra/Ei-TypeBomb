@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { PRODUCT_NAME } from "@/lib/config/product";
 import { getEtbBaseUrl } from "@/lib/config/base-url";
 import { Suspense } from "react";
 import "./globals.css";
@@ -46,28 +47,28 @@ export const metadata: Metadata = {
         ? { robots: { index: false, follow: false } }
         : {}),
     metadataBase: new URL(getEtbBaseUrl()),
-    title: "ETB",
+    title: PRODUCT_NAME,
     description:
         "好きな単語リストで、友達と一緒にタイピングゲームをプレイしながら単語を覚えられるオンラインゲーム。",
     openGraph: {
-        title: "ETB",
+        title: PRODUCT_NAME,
         description:
             "好きな単語リストで、友達と一緒にタイピングゲームをプレイしながら単語を覚えられるオンラインゲーム。",
         url: getEtbBaseUrl(),
-        siteName: "ETB",
+        siteName: PRODUCT_NAME,
         images: [
             {
                 url: "/hero.png",
                 width: 1280,
                 height: 640,
-                alt: "ETB",
+                alt: PRODUCT_NAME,
             },
         ],
         type: "website",
     },
     twitter: {
         card: "summary_large_image",
-        title: "ETB",
+        title: PRODUCT_NAME,
         description:
             "好きな単語リストで、友達と一緒にタイピングゲームをプレイしながら単語を覚えられるオンラインゲーム。",
         images: ["/hero.png"],

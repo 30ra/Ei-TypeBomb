@@ -4,6 +4,7 @@ import { useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import posthog from "posthog-js";
 import Button from "@/components/ui/Button";
+import { PRODUCT_NAME } from "@/lib/config/product";
 
 export default function RoomShareActions({
     link,
@@ -57,7 +58,7 @@ export default function RoomShareActions({
                 inert={!showQrCode}
             >
                 <div className="font-extrabold text-cyan-600 text-2xl">
-                    Ei-TypeBomb
+                    {PRODUCT_NAME}
                 </div>
                 <div className="w-full bg-(--color-background) gap-8 md:gap-16 flex flex-col lg:flex-row justify-center items-center">
                     <QRCodeSVG
