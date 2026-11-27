@@ -13,6 +13,7 @@ fn main() {
 
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(site))
                 .title("Ei-TypeBomb")
+                .initialization_script(include_str!("back.js"))
                 .inner_size(1120.0, 780.0)
                 .on_navigation(move |url| {
                     url.origin() == allowed_origin

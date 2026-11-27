@@ -78,6 +78,7 @@ jobs:
           install -Dm755 "$binary" "$pkg/usr/bin/ei-typebomb-desktop"
           install -Dm644 icons/icon.png "$pkg/usr/share/icons/hicolor/1024x1024/apps/ei-typebomb-desktop.png"
           install -Dm644 ../../LICENSE "$pkg/usr/share/doc/ei-type-bomb/copyright"
+          install -Dm644 src/lucide-LICENSE "$pkg/usr/share/doc/ei-type-bomb/lucide-LICENSE"
           mkdir -p "$pkg/DEBIAN" "$pkg/usr/share/applications"
           printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=Ei-TypeBomb' 'Exec=ei-typebomb-desktop' 'Icon=ei-typebomb-desktop' 'Categories=Game;' > "$pkg/usr/share/applications/Ei-TypeBomb.desktop"
           version=$(sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml | head -1)
