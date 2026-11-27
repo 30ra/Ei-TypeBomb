@@ -111,6 +111,131 @@ for (const [runtime, rules] of [
             );
         }
     });
+    test(`${runtime}: fallback rotates away from the previous bomb word`, () => {
+        const first = active();
+        assert.equal(first.room.wordIndex, 0);
+        const passed = apply(
+            first,
+            { type: "word:success", playerId: "a" },
+            { random: () => 0 },
+        ).state;
+        assert.equal(passed.room.wordIndex, 1);
+
+        const returned = apply(
+            passed,
+            { type: "word:success", playerId: "b" },
+            { random: () => 0 },
+        ).state;
+        assert.equal(returned.room.wordIndex, 0);
+
+        // Even a valid personalized recommendation must not immediately
+        // repeat a word when an alternative is available.
+        const selections: Parameters<NonNullable<GameContext["onItemSelected"]>>[0][] = [];
+        const preferred = apply(
+            first,
+            { type: "word:success", playerId: "a" },
+            {
+                chooseItemIndex: () => 0,
+                random: () => 0,
+                onItemSelected: (selection) => selections.push(selection),
+            },
+        ).state;
+        assert.equal(preferred.room.wordIndex, 1);
+        assert.equal(selections[0].source, "random");
+        assert.equal(selections[0].rejectedRecommendedIndex, 0);
+        // The original recommendation can be used after another word is played.
+        const afterGap = apply(
+            preferred,
+            { type: "word:success", playerId: "b" },
+            { chooseItemIndex: () => 0, random: () => 0 },
+        ).state;
+        assert.equal(afterGap.room.wordIndex, 0);
+
+        // Single-word rooms must continue to work.
+        const oneWord = { ...first, room: { ...first.room, items: first.room.items.slice(0, 1) } };
+        const only = apply(oneWord, { type: "word:success", playerId: "a" }).state;
+        assert.equal(only.room.wordIndex, 0);
+    });
+    test(`${runtime}: bounds repeat suppression across players and restarts`, () => {
+        const seeded = joined();
+        seeded.room.items = Array.from({ length: 9 }, (_, i) => ({
+            id: String(i),
+            type: "typed_recall" as const,
+            prompt: String(i),
+            answer: String(i),
+        }));
+        let state = apply(seeded, start).state;
+        assert.deepEqual(state.recentItemIndices, []);
+        state = apply(state, { type: "deadline" }, {
+            now: state.wordAt!,
+            chooseItemIndex: () => 0,
+        }).state;
+        assert.equal(state.room.wordIndex, 0);
+        for (const expected of [1, 2, 3, 0]) {
+            const previous = state;
+            const playerId = state.room.users[state.room.bombHolder].id;
+            state = apply(state, { type: "word:success", playerId }, {
+                chooseItemIndex: () => 0,
+                random: () => 0,
+            }).state;
+            assert.equal(state.room.wordIndex, expected);
+            assert.ok((state.recentItemIndices?.length ?? 0) <= 3);
+            assert.notEqual(state.recentItemIndices, previous.recentItemIndices);
+        }
+        assert.deepEqual(state.recentItemIndices, [2, 3, 0]);
+        assert.deepEqual(structuredClone(state).recentItemIndices, [2, 3, 0]);
+        const ended = apply(state, {
+            type: "room:leave",
+            playerId: state.room.users[0].id,
+            reason: "room_leave",
+        }).state;
+        assert.equal(ended.recentItemIndices, undefined);
+    });
+    test(`${runtime}: multiple bombs cannot select the same recommended word simultaneously`, () => {
+        let state = fresh();
+        state.room.maxPlayers = 5;
+        state.room.bombCount = 2;
+        state.room.items = Array.from({ length: 10 }, (_, i) => ({
+            id: String(i), type: "typed_recall" as const,
+            prompt: String(i), answer: String(i),
+        }));
+        for (const id of ["a", "b", "c", "d", "e"]) {
+            state = apply(state, { type: "room:join", player: { id } }).state;
+        }
+        state = apply(state, start).state;
+        state = apply(state, { type: "deadline" }, {
+            now: state.wordAt!,
+            chooseItemIndex: () => 0,
+            random: () => 0,
+        }).state;
+        assert.deepEqual(state.room.bombs?.map((bomb) => bomb.wordIndex), [0, 1]);
+        assert.deepEqual(state.recentItemIndices, [0, 1]);
+    });
+    test(`${runtime}: assigns personalized words to the actual holder`, () => {
+        const state = active();
+        const recommendations: Record<string, number> = { a: 1, b: 2 };
+        const chooseItemIndex: GameContext["chooseItemIndex"] =
+            (playerId) => recommendations[playerId];
+        // A passes to B, and B receives B's recommendation, not A's.
+        const passed = apply(state, { type: "word:success", playerId: "a" }, { chooseItemIndex }).state;
+        assert.equal(passed.room.bombs?.[0]?.wordIndex, 2);
+        const returned = apply(passed, { type: "word:success", playerId: "b" }, { chooseItemIndex }).state;
+        assert.equal(returned.room.bombs?.[0]?.wordIndex, 1);
+        // A malicious or stale suggestion can never escape the room item range.
+        const invalid = apply(passed, { type: "word:success", playerId: "b" }, {
+            chooseItemIndex: () => 1000,
+            random: () => 0,
+        }).state;
+        assert.equal(invalid.room.bombs?.[0]?.wordIndex, 0);
+    });
+    test(`${runtime}: initial questions use the starting holder's recommendation`, () => {
+        const game = apply(joined(), start).state;
+        const started = apply(game, { type: "deadline" }, {
+            now: game.wordAt!,
+            chooseItemIndex: (playerId) => playerId === "a" ? 2 : 1,
+        }).state;
+        assert.equal(started.room.bombs?.[0]?.wordIndex, 2);
+    });
     test(`${runtime}: non-holder successes and input are ignored`, () => {
         const state = active();
         for (const event of [
@@ -134,7 +259,7 @@ for (const [runtime, rules] of [
                     type: "broadcast",
                     packet: {
                         event: "typing:input",
-                        data: { input: "x".repeat(32) },
+                        data: { input: "x".repeat(40), playerId: "a", focusPlayerId: "a", hintLength: 0 },
                     },
                 },
             ],
@@ -246,6 +371,7 @@ function assertReset(state: GameState) {
     assert.equal(state.room.bombStatus, 0);
     assert.equal(state.wordAt, undefined);
     assert.equal(state.bombAt, undefined);
+    assert.equal(state.recentItemIndices, undefined);
 }
 test("revision increments only when persistent game state changes", () => {
     let state = fresh();
@@ -316,7 +442,10 @@ test("preserves existing runtime differences explicitly", () => {
     }
 });
 test("validates names, auth payloads, health IDs, and typing data", () => {
-    for (const name of [null, "", "x".repeat(51), "x\n", "x\u200b"])
+    // Missing names intentionally fall back to the server's default.
+    for (const name of [null, undefined, ""])
+        assert.equal(validateDisplayName(name), "プレイヤー");
+    for (const name of [123, "x".repeat(51), "x\n", "x\u200b"])
         assert.throws(() => validateDisplayName(name));
     assert.equal(validateDisplayName("猫 Player"), "猫 Player");
     assert.throws(() =>

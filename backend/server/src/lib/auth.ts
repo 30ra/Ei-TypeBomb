@@ -1,29 +1,44 @@
-import dotenv from "dotenv";
-dotenv.config();
+import "dotenv/config";
+import { ROOM_JWT_POLICY, SESSION_JWT_POLICY } from "../../../shared/jwtPolicy";
+import { importJWK, jwtVerify, type JWK } from "jose";
+import { getAuthenticatedRoomId } from "../../../shared/roomJwt";
+import { getVerifiedSessionId } from "../../../shared/sessionJwt";
 
-import jwt from "jsonwebtoken";
+const KEY_ID = process.env.JWT_KEY_ID;
+const PUBLIC_KEY_JSON = process.env.JWT_PUBLIC_KEY;
+
+if (!KEY_ID || !PUBLIC_KEY_JSON) {
+    throw new Error("JWT public key configuration is missing");
+}
+
+const publicKeyPromise = importJWK(JSON.parse(PUBLIC_KEY_JSON) as JWK, "ES256");
 
 export const verifyToken = async (jwtToken: string): Promise<string | null> => {
-    const JWT_SECRET = process.env.JWT_SECRET!;
-
     try {
-        const decoded = await new Promise<any>((resolve, reject) => {
-            jwt.verify(jwtToken, JWT_SECRET, (err, decodedPayload) => {
-                if (err) return reject(err);
-                resolve(decodedPayload);
-            });
-        });
+        const publicKey = await publicKeyPromise;
 
-        const roomId = decoded?.id;
+        const { payload, protectedHeader } = await jwtVerify(
+            jwtToken,
+            publicKey,
+            ROOM_JWT_POLICY,
+        );
 
-        if (typeof roomId !== "string" || !roomId.trim()) {
-            console.error("Incorrect JWT Token");
-            return null;
-        }
-
-        return roomId;
-    } catch (error) {
-        console.error("Incorrect JWT Token:", error);
+        return getAuthenticatedRoomId(payload, protectedHeader.kid, KEY_ID);
+    } catch {
+        console.error("JWT verification failed");
         return null;
     }
+};
+
+/** A session JWT cannot be used to join a room; it only binds a verified room authorization to one browser tab. */
+export const verifyClientSessionToken = async (
+    token: string,
+    roomId: string,
+): Promise<string> => {
+    const { payload, protectedHeader } = await jwtVerify(
+        token,
+        await publicKeyPromise,
+        SESSION_JWT_POLICY,
+    );
+    return getVerifiedSessionId(payload, protectedHeader.kid, KEY_ID!, roomId);
 };

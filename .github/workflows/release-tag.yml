@@ -1,129 +1,145 @@
 name: Create Release Tag
 
 on:
-  pull_request:
-    types: [closed]
-    branches:
-      - production
+    pull_request:
+        types: [closed]
+        branches:
+            - production
 
 permissions:
-  contents: write
+    contents: write
 
 jobs:
-  release:
-    if: github.event.pull_request.merged == true
-    runs-on: ubuntu-latest
+    release:
+        if: github.event.pull_request.merged == true
+        runs-on: ubuntu-latest
 
-    steps:
-      - name: Checkout merge commit
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
-          fetch-depth: 0
+        steps:
+            - name: Validate release notes
+              env:
+                  PR_BODY: ${{ github.event.pull_request.body }}
+              shell: bash
+              run: |
+                  set -euo pipefail
 
-      - name: Determine release type
-        id: release_type
-        env:
-          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
-        shell: bash
-        run: |
-          set -euo pipefail
+                  if [ -z "${PR_BODY//[[:space:]]/}" ]; then
+                    echo "The merged production PR must have a non-empty description because it is used as the GitHub Release notes."
+                    exit 1
+                  fi
 
-          major=false
-          minor=false
-          patch=false
+            - name: Checkout merge commit
+              uses: actions/checkout@v4
+              with:
+                  ref: ${{ github.event.pull_request.merge_commit_sha }}
+                  fetch-depth: 0
 
-          IFS=',' read -ra labels <<< "$LABELS"
-          for label in "${labels[@]}"; do
-            case "${label,,}" in
-              major) major=true ;;
-              minor) minor=true ;;
-              patch) patch=true ;;
-            esac
-          done
+            - name: Determine release type
+              id: release_type
+              env:
+                  LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+              shell: bash
+              run: |
+                  set -euo pipefail
 
-          count=0
-          $major && count=$((count + 1))
-          $minor && count=$((count + 1))
-          $patch && count=$((count + 1))
+                  major=false
+                  minor=false
+                  patch=false
 
-          if [ "$count" -ne 1 ]; then
-            echo "Exactly one of Major, Minor, or Patch must be set on the merged production PR."
-            exit 1
-          fi
+                  IFS=',' read -ra labels <<< "$LABELS"
+                  for label in "${labels[@]}"; do
+                    case "${label,,}" in
+                      major) major=true ;;
+                      minor) minor=true ;;
+                      patch) patch=true ;;
+                    esac
+                  done
 
-          if $major; then
-            echo "type=major" >> "$GITHUB_OUTPUT"
-          elif $minor; then
-            echo "type=minor" >> "$GITHUB_OUTPUT"
-          else
-            echo "type=patch" >> "$GITHUB_OUTPUT"
-          fi
+                  count=0
+                  $major && count=$((count + 1))
+                  $minor && count=$((count + 1))
+                  $patch && count=$((count + 1))
 
-      - name: Calculate next version
-        id: version
-        env:
-          RELEASE_TYPE: ${{ steps.release_type.outputs.type }}
-        shell: bash
-        run: |
-          set -euo pipefail
+                  if [ "$count" -ne 1 ]; then
+                    echo "Exactly one of Major, Minor, or Patch must be set on the merged production PR."
+                    exit 1
+                  fi
 
-          latest="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname | head -n 1)"
-          if [ -z "$latest" ]; then
-            latest="v0.0.0"
-          fi
+                  if $major; then
+                    echo "type=major" >> "$GITHUB_OUTPUT"
+                  elif $minor; then
+                    echo "type=minor" >> "$GITHUB_OUTPUT"
+                  else
+                    echo "type=patch" >> "$GITHUB_OUTPUT"
+                  fi
 
-          if [[ ! "$latest" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Latest release tag is not a valid SemVer tag: $latest"
-            exit 1
-          fi
+            - name: Calculate next version
+              id: version
+              env:
+                  RELEASE_TYPE: ${{ steps.release_type.outputs.type }}
+              shell: bash
+              run: |
+                  set -euo pipefail
 
-          version="${latest#v}"
-          IFS='.' read -r major minor patch <<< "$version"
+                  latest="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname | head -n 1)"
+                  if [ -z "$latest" ]; then
+                    latest="v0.0.0"
+                  fi
 
-          case "$RELEASE_TYPE" in
-            major)
-              major=$((major + 1))
-              minor=0
-              patch=0
-              ;;
-            minor)
-              minor=$((minor + 1))
-              patch=0
-              ;;
-            patch)
-              patch=$((patch + 1))
-              ;;
-          esac
+                  if [[ ! "$latest" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                    echo "Latest release tag is not a valid SemVer tag: $latest"
+                    exit 1
+                  fi
 
-          next="v${major}.${minor}.${patch}"
-          echo "latest=$latest" >> "$GITHUB_OUTPUT"
-          echo "version=$next" >> "$GITHUB_OUTPUT"
+                  version="${latest#v}"
+                  IFS='.' read -r major minor patch <<< "$version"
 
-      - name: Create and push tag
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        shell: bash
-        run: |
-          set -euo pipefail
+                  case "$RELEASE_TYPE" in
+                    major)
+                      major=$((major + 1))
+                      minor=0
+                      patch=0
+                      ;;
+                    minor)
+                      minor=$((minor + 1))
+                      patch=0
+                      ;;
+                    patch)
+                      patch=$((patch + 1))
+                      ;;
+                  esac
 
-          if git rev-parse "$VERSION" >/dev/null 2>&1; then
-            echo "Tag $VERSION already exists."
-            exit 1
-          fi
+                  next="v${major}.${minor}.${patch}"
+                  echo "latest=$latest" >> "$GITHUB_OUTPUT"
+                  echo "version=$next" >> "$GITHUB_OUTPUT"
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$VERSION" -m "Release $VERSION" HEAD
-          git push origin "$VERSION"
+            - name: Create and push tag
+              env:
+                  VERSION: ${{ steps.version.outputs.version }}
+              shell: bash
+              run: |
+                  set -euo pipefail
 
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          set -euo pipefail
-          gh release create "$VERSION" \
-            --target "${{ github.event.pull_request.merge_commit_sha }}" \
-            --title "$VERSION" \
-            --generate-notes
+                  if git rev-parse "$VERSION" >/dev/null 2>&1; then
+                    echo "Tag $VERSION already exists."
+                    exit 1
+                  fi
+
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                  git tag -a "$VERSION" -m "Release $VERSION" HEAD
+                  git push origin "$VERSION"
+
+            - name: Create GitHub Release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  VERSION: ${{ steps.version.outputs.version }}
+                  PR_BODY: ${{ github.event.pull_request.body }}
+              run: |
+                  set -euo pipefail
+
+                  printf '%s' "$PR_BODY" > release-notes.md
+
+                  gh release create "$VERSION" \
+                    --target "${{ github.event.pull_request.merge_commit_sha }}" \
+                    --title "$VERSION" \
+                    --notes-file release-notes.md

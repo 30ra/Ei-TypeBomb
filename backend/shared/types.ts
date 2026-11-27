@@ -3,9 +3,20 @@ export type TypedRecallItem = {
     type: "typed_recall";
     prompt: string;
     answer: string;
+    readings?: string[];
 };
 export type Item = TypedRecallItem;
 export type User = { id: string; displayName?: string; pulse?: string };
+export type BombState = {
+    id: string;
+    holder: number;
+    status: number;
+    wordIndex?: number;
+    at: number;
+    turn: number;
+    hintLength?: number;
+};
+export type GameLoser = { id: string; displayName?: string };
 export type Room = {
     id: string;
     userId?: string;
@@ -13,6 +24,7 @@ export type Room = {
     explanation?: string;
     items: Item[];
     maxPlayers?: number;
+    bombCount?: number | null;
     gameDuration: number;
     password?: string | null;
     createdAt?: string;
@@ -23,10 +35,16 @@ export type Room = {
     bombHolder: number;
     wordIndex?: number;
     bombStatus: number;
+    bombs?: BombState[];
+    losers?: GameLoser[];
+    typingFocusPlayerId?: string;
+    typingFocusInput?: string;
 };
 // Serializable deadlines in epoch milliseconds. Transport IDs are opaque player IDs.
 export type GameState = {
     room: Room;
+    /** Recent room-wide question indices; authoritative and persisted across failover. */
+    recentItemIndices?: number[];
     wordAt?: number;
     bombAt?: number;
     revision: number;

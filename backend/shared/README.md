@@ -1,82 +1,86 @@
-# Shared game core
+# Shared backend core
 
-The common source lives at `backend/shared/`, beside `backend/server/` and
-`backend/cloudflare/`. Both runtime adapters import this same source.
+`backend/shared/` contains runtime-independent TypeScript for the current
+Node server and the Cloudflare Worker adapter. Runtime-specific code lives in
+`backend/server/` and `backend/cloudflare/`.
 
-`types.ts` defines serializable `Room` / `GameState` and opaque player IDs.
-`protocol.ts` defines both directions of the existing protocol, Socket.IO handler
-types, and the public room snapshot (including legacy `words`, excluding passwords).
-`validation.ts` validates auth payloads, names, health IDs, item configuration and
-client event payloads. `rateLimits.ts` owns common event budget settings.
+## Shared code
 
-`game.ts` exports `applyGameEvent(state, event, context)`. It returns a new state
-and ordered effects: protocol broadcasts and game activities. It does not mutate
-its input, access a database, use a transport or create a timer. The runtime
-supplies the clock, entropy and generated game ID. DB loaders still live in
-`backend/server/src/lib/get.ts` and `backend/cloudflare/src/lib/services.ts`; they pass the refreshed
-game duration into the core at start. There is no repository interface because
-these adapters do not need interchangeable database implementations yet.
+- `types.ts`: serializable rooms, users, bombs and game state
+- `game.ts`: pure `applyGameEvent` transitions and absolute game deadlines
+- `session.ts`: session shape, reconnect deadlines and empty-room policy
+- `protocol.ts`: client/server event contracts and safe public room snapshots
+- `validation.ts`: payload checks, auth responses, recommendations and hints
+- `room.ts`: database column projection and common `roomFromRow` mapping
+- `rateLimits.ts`: protocol event budgets
+- `keyedRateLimit.ts`: runtime-neutral per-key token bucket and bounded storage
+- `addressRateLimit.ts`: per-address limiter policy (1,000 keys, 60s stale TTL)
+- `roomJwt.ts`: validated room identity claims _after_ JWT signature verification
+- `jwtPolicy.ts`: ES256 issuer, audience and required expiry policies
+- `distributed/`: durable ownership protocol, ordered replication and paused recovery
+  (`version.ts` also supplies the browser's snapshot version fence)
+
+The shared limiter takes a clock supplied by its caller. The runtime chooses
+whether keys represent sockets, clients, remote IPs or Durable Object sessions
+and owns the lifetime of the limiter. It should never use untrusted proxy
+headers to derive an address without validating their trust boundary.
+
+`getAuthenticatedRoomId` checks `kid`, `role` and the room UUID. It **does
+not** verify JWT signatures, algorithms, expiry, audience, or issuer. Each
+runtime must perform cryptographic token verification first.
 
 ## Runtime boundaries
 
-- Node: `backend/server/src/lib/gameAdapter.ts` holds state and a private `setTimeout`
-  handle; `backend/server/src/index.ts` handles Socket.IO, authentication, PostgreSQL,
-  room lifecycle, logs and analytics. Async configuration reads recheck the
-  current adapter and start eligibility before applying an event.
-- Worker: `backend/cloudflare/src/index.ts` handles Native WebSocket, authentication,
-  Supabase reads, DO Storage, hibernation and session expiry. It serializes game
-  operations, saves transitions before publishing effects, and schedules the
-  earliest game/session deadline through DO Alarm.
-- Rate-limit bucket storage, unknown-event handling and health-probe scope remain
-  runtime-specific (Node addresses vs Worker health DO).
+**Node**: `backend/server/src/index.ts` implements Socket.IO, in-memory
+room ownership, authentication, event routing, logging and analytics.
+`lib/gameAdapter.ts` owns the Node timer. `lib/get.ts` reads room data.
+Socket and probe rate-limit adapters supply the clock and selected budgets.
 
-`wordAt` and `bombAt` are absolute epoch-millisecond deadlines at the top level of
-`GameState`, preserving the existing Worker storage shape. `nextGameDeadline`
-selects the earliest deadline; `deadline` consumes due events and schedules the
-next bomb phase from the supplied current time. Bomb phases remain 0–4, with
-explosion on the following deadline. The countdown remains 3 seconds and each
-bomb phase lasts configured duration + random 0–10 seconds. Late execution advances
-one bomb phase, matching the existing behavior.
+**Cloudflare Worker**: `backend/cloudflare/src/RoomDO.ts` uses native
+WebSockets, PostgREST, ES256 JWT verification, Durable Object storage and
+Alarm scheduling. It imports the shared core without bringing in
+`node:perf_hooks`, Socket.IO, Express, PostgreSQL or process globals.
 
-Existing differences are explicit in the runtime configuration:
-`NODE_GAME_RULES` in the Node adapter and `WORKER_GAME_RULES` in
-`backend/cloudflare/src/lib/gameRules.ts`:
-Node permits spectator starts and holder passes during countdown; Worker rejects
-both. Worker clears typing input when stopping; Node retains its existing stop
-notification behavior. These settings preserve compatibility and can be unified
-later as an intentional rules change.
+The game state stores absolute epoch-millisecond deadlines. Distributed mode
+preserves game IDs, seats, bomb turns and question indices, shifts deadlines
+across a migration pause, and commits locally with best-effort WebSocket
+replication (solo commits; temporary divergence possible). Peer declarations
+check public topology and do not cryptographically authenticate the sender.
+There is no database-backed control plane.
+See [distributed operation and setup](../DISTRIBUTED.md).
+See [lifecycle audit and invariants](../../docs/architecture/server-lifecycle.md)
+and [executed validation](../../docs/architecture/server-lifecycle-validation.md).
 
-## Future extensions
+## Verification
 
-For `playerSessionId`, resolve transport/session IDs to a stable `playerId` in each
-runtime before constructing core events, and use that ID in `Room.users`. The core
-requires no Socket.IO or WebSocket changes. Stable reconnect membership and JWT
-identity policy belong in the runtime authentication/session adapters.
+- `npm test --prefix backend/server`: existing game/core/Socket.IO tests and
+  shared utility tests
+- `npm run typecheck --prefix backend/server`: Node and shared type checking
+- `npm run build --prefix backend/server`: compiles Node plus shared sources
+- `backend/shared/tsconfig.json`: dependency-free shared editor configuration
 
-For sticky ownership or failover, add ownership and synchronization around runtime
-state loading/saving. Transfer the serializable `GameState`, keep `gameId` and
-absolute deadlines, then reschedule with the receiving runtime. Ownership epochs,
-effect deduplication and fencing are future adapter responsibilities; this change
-does not implement failover or cross-server synchronization.
+The Cloudflare build bundles shared imports directly from `backend/shared/`.
+Run `npm install` and then `npm run typecheck && npm test` from
+`backend/cloudflare/` to check the Cloudflare adapter.
 
-## Verification and builds
+## Reconnection foundation (phase 1)
 
-- `cd backend/server && npm test`: shared unit tests, Node timer tests and existing tests.
-- `cd backend/server && npm run build`: compiles Node and its imported shared sources.
-  TypeScript emits Node code at `backend/server/dist/server/src/` and shared
-  code at `backend/server/dist/shared/`. A generated `dist/index.js` entry keeps
-  the compiled startup path unchanged.
-  `npm start` / `npm run dev` keep working.
-  Deploy the complete `dist` directory when using compiled JavaScript.
-- `cd backend/server && npm run typecheck`: checks both source and Node tests. The tests
-  have a dedicated `test/tsconfig.json` using the server's `@types/node`.
-- `cd backend/cloudflare && npm test`: Worker integration tests, including a scenario that
-  applies the same events through the real GameRoom adapter and NodeGameAdapter
-  and compares persisted states after every event.
-- `cd backend/cloudflare && npm run typecheck && npm run build`: typecheck and Wrangler
-  dry-run bundle (no deployment). Wrangler bundles imported shared sources.
+Vercel signs a new, room-bound `client_session` JWT for each page instance.
+Node and Worker verify it with the existing ES256 public key before using the
+`sessionId` as the player ID. Transport socket IDs are disposable. A signed
+session JWT is kept only in the page's memory; a reload creates a new player.
 
-Keep `backend/shared/` beside the selected runtime directory when building or
-running TypeScript sources. Shared code adds no dependencies or install step.
-The standalone shared TypeScript configuration uses only ES types; Node tests
-remain under `backend/server/test/` and resolve that project's `@types/node`.
+Network disconnects now get a 20s reconnection grace period before the room
+processes `room:leave`. Deliberate `room:leave` remains immediate. Distributed
+mode reuses the same session JWT across Node/Worker transports. A new tab gets
+a different signed identity; a reconnect receives an authoritative snapshot.
+
+## Hierarchy configuration
+
+Set the **same** `ETB_CLUSTER_CONFIG` on Vercel and every game server:
+
+```dotenv
+ETB_CLUSTER_CONFIG='{"version":1,"servers":["https://primary.example.com","https://worker.example.com/ws","https://render.example.com"]}'
+```
+
+The array defines priority and `/ws` identifies Workers. Server-specific keys and `CLUSTER_SERVER_TOKEN` authentication have been removed. Node restores its URL from `CLUSTER_STATE_DIR`; a fresh local Node defaults to Primary, Render uses `RENDER_EXTERNAL_URL`, and a sole Worker entry is selected automatically. Set `SERVER_PUBLIC_URL` for other replicas or multiple Workers. Keep voting state on persistent storage. Peer access is trusted: public declarations do not prevent impersonation. Player JWT authentication remains required. See [distributed setup](../DISTRIBUTED.md).

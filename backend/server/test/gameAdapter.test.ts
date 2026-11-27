@@ -8,22 +8,27 @@ const fresh = (): GameState => ({ room: {
     id: 'room', users: [{ id: 'a' }, { id: 'b' }], items: [{ id: 'item', type: 'typed_recall', prompt: '猫', answer: 'cat' }],
     maxPlayers: 2, gameDuration: 1, isStart: false, bombStatus: 0, bombHolder: 0,
 }, revision: 0 });
-test('typing and ignored events retain room identity while forwarding input effects', t => {
+test('typing updates shared focus while ignored events retain room identity', t => {
     const state = fresh();
     state.room.isStart = true;
     state.room.gameId = 'game';
-    const callbacks: { result: GameResult; previous: GameState }[] = [];
-    const adapter = new NodeGameAdapter(state, (result, previous) => callbacks.push({ result, previous }));
+    state.room.typingFocusPlayerId = 'a';
+    state.room.typingFocusInput = '';
+    state.room.bombs = [{ id: '0', holder: 0, status: 0, at: Date.now() + 60000, turn: 0 }];
+    const callbacks: { result: GameResult; previous: GameState; eventType: string }[] = [];
+    const adapter = new NodeGameAdapter(state, (result, previous, event) =>
+        callbacks.push({ result, previous, eventType: event.type }));
     t.after(() => adapter.dispose());
 
     for (let i = 0; i < 30; i++) {
         adapter.apply({ type: 'currentInput', playerId: 'a', input: String(i) });
     }
     assert.equal(callbacks.length, 30);
+    assert.ok(callbacks.every(({ eventType }) => eventType === 'currentInput'));
     for (const [i, { result, previous }] of callbacks.entries()) {
-        assert.equal(result.state.room, previous.room);
+        assert.notEqual(result.state.room, previous.room);
         assert.deepEqual(result.effects, [{ type: 'broadcast', packet: {
-            event: 'typing:input', data: { input: String(i) },
+            event: 'typing:input', data: { input: String(i), playerId: 'a', focusPlayerId: 'a', hintLength: 0 },
         } }]);
     }
 
@@ -36,13 +41,21 @@ test('typing and ignored events retain room identity while forwarding input effe
 
     adapter.apply({ type: 'word:success', playerId: 'a' });
     const transition = callbacks.at(-1)!;
+    assert.equal(transition.eventType, 'word:success');
     assert.notEqual(transition.result.state.room, transition.previous.room);
     assert.equal(transition.result.state.room.bombHolder, 1);
 });
 test('Node adapter uses absolute deadlines for countdown and every bomb phase', t => {
     t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
     const effects: GameEffect[] = [];
-    const adapter = new NodeGameAdapter(fresh(), result => effects.push(...result.effects), Date.now, () => 0);
+    const traces: { message: string; metadata: Record<string, unknown> }[] = [];
+    const adapter = new NodeGameAdapter(
+        fresh(),
+        result => effects.push(...result.effects),
+        Date.now,
+        () => 0,
+        (message, metadata) => traces.push({ message, metadata }),
+    );
     t.after(() => adapter.dispose());
     adapter.apply({ type: 'game:start', playerId: 'a', gameId: 'game', gameDuration: 1 });
     assert.equal(adapter.state.wordAt, 4000);
@@ -50,6 +63,16 @@ test('Node adapter uses absolute deadlines for countdown and every bomb phase', 
     t.mock.timers.tick(1000);
     assert.equal(adapter.state.room.bombStatus, 1);
     assert.equal(adapter.state.room.wordIndex, undefined);
+    assert.ok(traces.some(({ message, metadata }) =>
+        message === 'deadline_fired' && metadata.bombStatus === 0));
+    assert.ok(traces.some(({ message, metadata }) =>
+        message === 'deadline_applied' &&
+        metadata.previousStatus === 0 &&
+        metadata.nextStatus === 1));
+    assert.ok(traces.some(({ message, metadata }) =>
+        message === 'deadline_scheduled' &&
+        metadata.bombStatus === 1 &&
+        metadata.nextDeadline === 3000));
     t.mock.timers.tick(1000);
     t.mock.timers.tick(1000);
     assert.equal(adapter.state.room.wordIndex, 0);

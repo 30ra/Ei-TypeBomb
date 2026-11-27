@@ -1,0 +1,219 @@
+import { allowedAnswerChar, isAllowedTypingAnswer } from "../../../backend/shared/typing-answer.cjs";
+import { promptLengthError, answerLengthError } from "./item-limits.mjs";
+export { isAllowedTypingAnswer };
+
+const COUNTED_CHAR = /^[a-zA-Z0-9ぁ-ゖ]$/u;
+
+export function filterTypingAnswer(value) {
+    return Array.from(value).filter(allowedAnswerChar).join("");
+}
+
+export function countTypingCharacters(value) {
+    return Array.from(value).filter((char) => COUNTED_CHAR.test(char)).length;
+}
+
+export function orientImportPair(left, right) {
+    const leftCount = countTypingCharacters(left);
+    const rightCount = countTypingCharacters(right);
+    const leftIsDominant =
+        leftCount > rightCount && leftCount >= 2 * rightCount;
+    const answer = leftIsDominant ? left : right;
+    const question = leftIsDominant ? right : left;
+    // Right remains the answer for tied or similar lengths.
+    return { jp: question, en: answer };
+}
+
+function validatePair(left, right, rowNumber, rolesExplicit = false) {
+    if (
+        typeof left !== "string" ||
+        typeof right !== "string" ||
+        !left.trim() ||
+        !right.trim()
+    ) {
+        throw new Error(
+            `行${rowNumber}: 問題と回答はどちらも文字列で入力してください。`,
+        );
+    }
+    const item = rolesExplicit
+        ? { jp: left.trim(), en: right.trim() }
+        : orientImportPair(left.trim(), right.trim());
+    // Import is intentionally permissive: an answer may be unplayable until
+    // its author edits it. The room editor shows a per-item validation error.
+    const lengthError = promptLengthError(item.jp) ?? answerLengthError(item.en);
+    if (lengthError) throw new Error(`行${rowNumber}: ${lengthError}`);
+    return item;
+}
+
+function parseCsv(source) {
+    const rows = [];
+    let row = [],
+        field = "",
+        quoted = false,
+        closedQuote = false;
+    const finishField = () => {
+        row.push(field.trim());
+        field = "";
+        closedQuote = false;
+    };
+    const finishRow = () => {
+        finishField();
+        if (row.length !== 1 || row[0] !== "") rows.push(row);
+        row = [];
+    };
+
+    for (let i = 0; i < source.length; i++) {
+        const char = source[i];
+        if (quoted) {
+            if (char === '"') {
+                if (source[i + 1] === '"') {
+                    field += '"';
+                    i++;
+                } else {
+                    quoted = false;
+                    closedQuote = true;
+                }
+            } else field += char;
+        } else if (char === ",") finishField();
+        else if (char === "\n" || char === "\r") {
+            finishRow();
+            if (char === "\r" && source[i + 1] === "\n") i++;
+        } else if (closedQuote) {
+            if (!/\s/.test(char))
+                throw new Error("CSVの引用符の後に不正な文字があります。");
+        } else if (char === '"') {
+            if (field.trim()) throw new Error("CSVの引用符が不正です。");
+            field = "";
+            quoted = true;
+        } else field += char;
+    }
+    if (quoted) throw new Error("CSVの引用符が閉じられていません。");
+    finishRow();
+    if (!rows.length) throw new Error("CSVに問題がありません。");
+    // Validate the entire CSV before deciding the column roles.
+    // Each CSV uses one consistent orientation, based on the aggregated
+    // ASCII alphanumeric + hiragana counts of both complete columns.
+    const pairs = rows.map((columns, i) => {
+        if (columns.length !== 2)
+            throw new Error(`行${i + 1}: CSVは2列にしてください。`);
+        const [left, right] = columns;
+        if (!left.trim() || !right.trim()) {
+            throw new Error(
+                `行${i + 1}: 問題と回答はどちらも文字列で入力してください。`,
+            );
+        }
+        return [left.trim(), right.trim()];
+    });
+    const leftTotal = pairs.reduce(
+        (sum, [left]) => sum + countTypingCharacters(left),
+        0,
+    );
+    const rightTotal = pairs.reduce(
+        (sum, [, right]) => sum + countTypingCharacters(right),
+        0,
+    );
+    const answerIsLeft = leftTotal > rightTotal && leftTotal >= 2 * rightTotal;
+
+    return pairs.map(([left, right], i) =>
+        validatePair(
+            answerIsLeft ? right : left,
+            answerIsLeft ? left : right,
+            i + 1,
+            true,
+        ),
+    );
+}
+
+function parseJson(parsed) {
+    // Preferred compact format: { "ねこ": "cat", "桜": "さくら" }.
+    // Here keys are explicitly questions and values are explicitly answers;
+    // never reapply the CSV length heuristic or exports could swap roles.
+    if (
+        parsed !== null &&
+        typeof parsed === "object" &&
+        !Array.isArray(parsed)
+    ) {
+        const entries = Object.entries(parsed);
+        if (!entries.length)
+            throw new Error("JSONには問題と回答を1件以上入力してください。");
+        return entries.map(([question, answer], i) =>
+            validatePair(question, answer, i + 1, true),
+        );
+    }
+
+    // Read historical array formats for backwards compatibility.
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+        throw new Error("JSONは問題文と回答のオブジェクトにしてください。");
+    }
+    return parsed.map((entry, i) => {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+            throw new Error(
+                `行${i + 1}: JSONの各要素はオブジェクトにしてください。`,
+            );
+        }
+        if (
+            Object.hasOwn(entry, "question") &&
+            Object.hasOwn(entry, "answer")
+        ) {
+            return validatePair(entry.question, entry.answer, i + 1, true);
+        }
+        if (Object.hasOwn(entry, "jp") && Object.hasOwn(entry, "en")) {
+            return validatePair(entry.jp, entry.en, i + 1, true);
+        }
+        const entries = Object.entries(entry);
+        if (entries.length !== 1) {
+            throw new Error(
+                `行${i + 1}: JSONの各要素は問題と回答の1組にしてください。`,
+            );
+        }
+        return validatePair(entries[0][0], entries[0][1], i + 1);
+    });
+}
+
+export function parseImportedPairs(source) {
+    const normalized = source.replace(/^\uFEFF/, "").trim();
+    if (!normalized) throw new Error("インポートするデータがありません。");
+    // JSON syntax errors must not be treated as CSV.
+    if (normalized.startsWith("[") || normalized.startsWith("{")) {
+        let parsed;
+        try {
+            parsed = JSON.parse(normalized);
+        } catch {
+            throw new Error("JSONの構文が正しくありません。");
+        }
+        return parseJson(parsed);
+    }
+    return parseCsv(normalized);
+}
+
+export function exportAnswerPairs(items) {
+    const pairs = {};
+    const duplicatePrompts = [];
+
+    for (const item of items) {
+        if (Object.hasOwn(pairs, item.prompt)) {
+            duplicatePrompts.push(item.prompt);
+            continue;
+        }
+        Object.defineProperty(pairs, item.prompt, {
+            value: item.answer,
+            enumerable: true,
+            configurable: true,
+            writable: true,
+        });
+    }
+
+    // JSON objects cannot represent duplicate keys without losing data.
+    // Fall back to the historical array format when duplicate prompts exist.
+    if (duplicatePrompts.length > 0) {
+        return JSON.stringify(
+            items.map(({ prompt, answer }) => ({
+                question: prompt,
+                answer,
+            })),
+            null,
+            4,
+        );
+    }
+
+    return JSON.stringify(pairs, null, 4);
+}

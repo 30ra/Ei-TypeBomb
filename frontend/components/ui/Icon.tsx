@@ -1,0 +1,137 @@
+import {
+    Heart,
+    MessageCircle,
+    Share,
+    Shield,
+    Search,
+    Home,
+    User,
+    Archive,
+    Bookmark,
+    LogIn,
+    LogOut,
+    UserRoundPlus,
+    KeyRound,
+    LayoutGrid,
+    Mail,
+    Pen,
+    ArrowRight,
+    Check,
+    Plus,
+    Copy,
+    Settings,
+    Trash,
+    Download,
+    Upload,
+    Eye,
+    X,
+    RotateCcw,
+    Link,
+    Play,
+    Pause,
+    Lock,
+    LucideIcon,
+    Earth,
+    UsersRound,
+    CircleUserRound,
+    QrCode,
+    ArrowLeft,
+    Info,
+    WandSparkles,
+    Loader,
+    Loader2,
+    ChevronsUpDown,
+    GlobeOff,
+    ServerOff,
+    Users,
+    UserRoundCog,
+    Keyboard,
+    Send,
+    PlayingCardsFan,
+    BookmarkOff,
+    Lightbulb,
+    SquareArrowOutUpRight,
+    Clock,
+    ClipboardPen,
+} from "lucide-react";
+
+const icons: Record<string, LucideIcon> = {
+    heart: Heart,
+    comment: MessageCircle,
+    share: Share,
+    shield: Shield,
+    search: Search,
+    home: Home,
+    user: User,
+    archive: Archive,
+    bookmark: Bookmark,
+    logIn: LogIn,
+    logOut: LogOut,
+    userRoundPlus: UserRoundPlus,
+    keyRound: KeyRound,
+    layoutGrid: LayoutGrid,
+    mail: Mail,
+    pen: Pen,
+    arrowRight: ArrowRight,
+    arrowLeft: ArrowLeft,
+    check: Check,
+    plus: Plus,
+    copy: Copy,
+    settings: Settings,
+    trash: Trash,
+    download: Download,
+    upload: Upload,
+    eye: Eye,
+    x: X,
+    rotateCcw: RotateCcw,
+    link: Link,
+    play: Play,
+    pause: Pause,
+    lock: Lock,
+    earth: Earth,
+    usersRound: UsersRound,
+    circleUserRound: CircleUserRound,
+    qrCode: QrCode,
+    info: Info,
+    wandSparkles: WandSparkles,
+    loader: Loader,
+    loaderCircle: Loader2,
+    chevronsUpDown: ChevronsUpDown,
+    globeOff: GlobeOff,
+    serverOff: ServerOff,
+    users: Users,
+    userRoundCog: UserRoundCog,
+    keyboard: Keyboard,
+    send: Send,
+    playingCardsFan: PlayingCardsFan,
+    bookmarkOff: BookmarkOff,
+    lightbulb: Lightbulb,
+    squareArrowOutUpRight: SquareArrowOutUpRight,
+    clock: Clock,
+    clipboardPen: ClipboardPen,
+};
+
+export type IconName = keyof typeof icons;
+
+export function Icon({
+    name,
+    size = 24,
+    className,
+}: {
+    name: IconName;
+    size?: number | string;
+    className?: string;
+}) {
+    const IconComponent = icons[name];
+
+    if (!IconComponent) return null;
+
+    return (
+        <IconComponent
+            size={size}
+            className={className}
+            strokeWidth={2.5}
+            data-icon={name}
+        />
+    );
+}

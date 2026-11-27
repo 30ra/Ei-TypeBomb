@@ -1,0 +1,373 @@
+"use client";
+
+import { useEffect, useRef, useState, useCallback } from "react";
+import { motion, useSpring, useTransform } from "framer-motion";
+import { useFeatureFlagEnabled } from "posthog-js/react";
+import { getSlideCursorTarget, isSlideCursorActive, SLIDE_CURSOR_CHANGE } from "@/components/layout/slide-cursor";
+
+function getMorphCursorTarget(x: number, y: number) {
+    const roots = document.querySelectorAll<HTMLElement>(
+        '[data-picker] [data-morph-animating="true"], [data-morph-dialog] [data-morph-animating="true"]',
+    );
+    for (const root of Array.from(roots).reverse()) {
+        const layer = root.querySelector<HTMLElement>(
+            `[data-morph-layer="${root.dataset.morph}"]`,
+        );
+        if (!layer) continue;
+        const bounds = layer.getBoundingClientRect();
+        const css = getComputedStyle(layer);
+        const width = parseFloat(css.width);
+        const height = parseFloat(css.height);
+        if (!bounds.width || !bounds.height || !width || !height) continue;
+        const center = root.getBoundingClientRect();
+        const destination = root.closest<HTMLElement>("[data-morph-cursor-x]");
+        const centerX = destination
+            ? Number(destination.dataset.morphCursorX)
+            : center.left + center.width / 2;
+        const centerY = destination
+            ? Number(destination.dataset.morphCursorY)
+            : center.top + center.height / 2;
+        const left = centerX - width / 2;
+        const top = centerY - height / 2;
+        if (x < left || x > left + width || y < top || y > top + height)
+            continue;
+
+        const candidates = layer.querySelectorAll<HTMLElement>("[data-cursor]");
+        for (const element of Array.from(candidates).reverse()) {
+            const rect = element.getBoundingClientRect();
+            const natural = new DOMRect(
+                left + ((rect.left - bounds.left) * width) / bounds.width,
+                top + ((rect.top - bounds.top) * height) / bounds.height,
+                (rect.width * width) / bounds.width,
+                (rect.height * height) / bounds.height,
+            );
+            if (
+                x >= natural.left &&
+                x <= natural.right &&
+                y >= natural.top &&
+                y <= natural.bottom
+            ) {
+                return { element, rect: natural };
+            }
+        }
+        return { element: layer, rect: new DOMRect(left, top, width, height) };
+    }
+    return null;
+}
+
+function CustomCursor() {
+    const rootRef = useRef<HTMLDivElement>(null);
+
+    const mouse = useRef({
+        x: 0,
+        y: 0,
+    });
+
+    const target = useRef({
+        x: 0,
+        y: 0,
+        width: 25,
+        height: 25,
+        weight: 4,
+        opacity: 0,
+        borderRadius: 12.5,
+    });
+
+    const [isMouseDown, setIsMouseDown] = useState(false);
+    const [isPointerActive, setIsPointerActive] = useState(false);
+    const isPointerActiveRef = useRef(false);
+    const isMouseDownRef = useRef(false);
+
+    const springConfig = {
+        stiffness: 1000,
+        damping: 50,
+        mass: 1,
+    };
+
+    const cursorX = useSpring(0, springConfig);
+    const cursorY = useSpring(0, springConfig);
+
+    const cursorW = useSpring(25, springConfig);
+    const cursorH = useSpring(25, springConfig);
+
+    const cursorWeight = useSpring(3, springConfig);
+
+    const cursorOpacity = useSpring(0, springConfig);
+
+    const cursorBorderRadius = useSpring(12.5, springConfig);
+
+    const boxShadow = useTransform(
+        cursorWeight,
+        (latestWeight) =>
+            `0 0 0 ${latestWeight}px inset var(--color-foreground)`,
+    );
+
+    const handleMouseMove = useCallback(
+        (x: number, y: number) => {
+            mouse.current.x = x;
+            mouse.current.y = y;
+
+            const destination = getMorphCursorTarget(x, y) ?? getSlideCursorTarget(x, y);
+            let hit: Element | null = destination?.element ??
+                (isSlideCursorActive() ? null : document.elementFromPoint(x, y));
+
+            if (hit && rootRef.current?.contains(hit)) {
+                hit = null;
+            }
+
+            const buttonEl = hit?.closest<HTMLElement>(
+                '[data-cursor="button"]',
+            );
+            const textEl = hit?.closest<HTMLElement>('[data-cursor="text"]');
+
+            if (buttonEl) {
+                const rect =
+                    destination?.element === buttonEl
+                        ? destination.rect
+                        : buttonEl.getBoundingClientRect();
+                const style = window.getComputedStyle(buttonEl);
+                const shape = Number(buttonEl.dataset.cursorShape ?? 0);
+                const borderRadius = parseFloat(style.borderRadius) || 0;
+
+                if (shape === 0) {
+                    target.current = {
+                        x: rect.left + rect.width / 2,
+                        y: rect.top + rect.height / 2,
+
+                        width: rect.width + 16,
+                        height: rect.height + 16,
+
+                        weight: 4,
+                        opacity: 0.25,
+
+                        borderRadius: borderRadius + 8,
+                    };
+                } else if (shape === 1) {
+                    target.current = {
+                        x: rect.left + rect.width / 2,
+                        y: rect.top + rect.height / 2,
+
+                        width: rect.width,
+                        height: rect.height,
+
+                        weight: 1000,
+                        opacity: 0.15,
+
+                        borderRadius: borderRadius,
+                    };
+                } else if (shape === 2) {
+                    target.current = {
+                        x,
+                        y,
+
+                        width: 30,
+                        height: 30,
+
+                        weight: 15,
+
+                        opacity: 0.5,
+                        borderRadius: 15,
+                    };
+                }
+            } else if (textEl) {
+                const style = window.getComputedStyle(textEl);
+                const fontSize = parseFloat(style.fontSize) || 16;
+
+                target.current = {
+                    x,
+                    y,
+
+                    width: 3 * (isMouseDownRef.current ? 2 : 1),
+                    height:
+                        (fontSize + 10) * (isMouseDownRef.current ? 0.9 : 1),
+
+                    weight: 2 * (isMouseDownRef.current ? 2 : 1),
+                    opacity: 0.5,
+
+                    borderRadius: 12.5,
+                };
+            } else {
+                target.current = {
+                    x,
+                    y,
+
+                    width: 24,
+                    height: 24,
+
+                    weight: isMouseDownRef.current ? 8 : 4,
+                    opacity: 1,
+
+                    borderRadius: 12,
+                };
+            }
+
+            cursorX.set(target.current.x - target.current.width / 2);
+            cursorY.set(target.current.y - target.current.height / 2);
+            cursorW.set(target.current.width);
+            cursorH.set(target.current.height);
+            cursorOpacity.set(target.current.opacity);
+
+            const minimumWeight = Math.min(
+                target.current.width,
+                target.current.height,
+            );
+
+            cursorWeight.set(Math.min(target.current.weight, minimumWeight));
+
+            cursorBorderRadius.set(
+                Math.min(target.current.borderRadius, minimumWeight),
+            );
+        },
+        [
+            cursorX,
+            cursorY,
+            cursorW,
+            cursorH,
+            cursorOpacity,
+            cursorWeight,
+            cursorBorderRadius,
+        ],
+    );
+
+    useEffect(() => {
+        const setPointerActive = (active: boolean) => {
+            if (isPointerActiveRef.current === active) return;
+            isPointerActiveRef.current = active;
+            setIsPointerActive(active);
+            document.documentElement.classList.toggle(
+                "custom-cursor-active",
+                active,
+            );
+            if (!active) cursorOpacity.set(0);
+        };
+
+        const onPointerMove = (e: PointerEvent) => {
+            if (e.pointerType !== "mouse") {
+                setPointerActive(false);
+                return;
+            }
+            setPointerActive(true);
+            handleMouseMove(e.clientX, e.clientY);
+        };
+
+        const onPointerDown = (e: PointerEvent) => {
+            if (e.pointerType === "mouse") {
+                setPointerActive(true);
+                isMouseDownRef.current = true;
+                setIsMouseDown(true);
+                handleMouseMove(e.clientX, e.clientY);
+            } else {
+                setPointerActive(false);
+                isMouseDownRef.current = false;
+                setIsMouseDown(false);
+            }
+        };
+
+        const refresh = () => handleMouseMove(mouse.current.x, mouse.current.y);
+
+        const onMouseUp = (e: PointerEvent) => {
+            if (e.pointerType !== "mouse") return;
+            setIsMouseDown(false);
+            isMouseDownRef.current = false;
+
+            refresh();
+        };
+
+        window.addEventListener("pointermove", onPointerMove);
+        window.addEventListener("pointerdown", onPointerDown);
+
+        window.addEventListener("pointerup", onMouseUp);
+
+        window.addEventListener("morphcursorchange", refresh);
+        window.addEventListener(SLIDE_CURSOR_CHANGE, refresh);
+        window.addEventListener("resize", refresh);
+        window.addEventListener("scroll", refresh, true);
+        window.addEventListener("animationend", refresh, true);
+        window.addEventListener("transitionend", refresh, true);
+
+        return () => {
+            window.removeEventListener("pointermove", onPointerMove);
+            window.removeEventListener("pointerdown", onPointerDown);
+
+            window.removeEventListener("pointerup", onMouseUp);
+            document.documentElement.classList.remove("custom-cursor-active");
+
+            window.removeEventListener("morphcursorchange", refresh);
+            window.removeEventListener(SLIDE_CURSOR_CHANGE, refresh);
+            window.removeEventListener("resize", refresh);
+            window.removeEventListener("scroll", refresh, true);
+            window.removeEventListener("animationend", refresh, true);
+            window.removeEventListener("transitionend", refresh, true);
+        };
+    }, [handleMouseMove, cursorOpacity]);
+
+    useEffect(() => {
+        let timeoutId: number;
+
+        const observer = new MutationObserver((mutations) => {
+            const shapeChanged = mutations.some(
+                (mutation) =>
+                    mutation.type === "attributes" &&
+                    mutation.attributeName === "data-cursor-shape",
+            );
+
+            if (shapeChanged) {
+                // Keep cursor shape changes in sync with the selected background.
+                window.clearTimeout(timeoutId);
+                handleMouseMove(mouse.current.x, mouse.current.y);
+                return;
+            }
+
+            // Keep structural DOM updates debounced to avoid unnecessary refreshes.
+            window.clearTimeout(timeoutId);
+            timeoutId = window.setTimeout(() => {
+                handleMouseMove(mouse.current.x, mouse.current.y);
+            }, 100);
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            attributes: true,
+            attributeFilter: ["data-cursor-shape"],
+            subtree: true,
+        });
+
+        return () => {
+            window.clearTimeout(timeoutId);
+            observer.disconnect();
+        };
+    }, [handleMouseMove]);
+
+    return (
+        <motion.div
+            ref={rootRef}
+            // Keep the cursor's stacking context above picker menus (z-index: 50).
+            data-slide-cursor
+            className="z-100 pointer-events-none fixed inset-0"
+            style={{
+                opacity: isPointerActive ? cursorOpacity : 0,
+            }}
+        >
+            <motion.div
+                className={`${isMouseDown && "scale-95"} transition-transform z-25 duration-(--duration-etb) ease-etb fixed`}
+                style={{
+                    left: cursorX,
+                    top: cursorY,
+
+                    width: cursorW,
+                    height: cursorH,
+
+                    boxShadow,
+
+                    borderRadius: cursorBorderRadius,
+                }}
+            />
+        </motion.div>
+    );
+}
+
+export default function Cursor() {
+    const customCursorEnabled = useFeatureFlagEnabled("customCursor") !== false;
+
+    return customCursorEnabled ? <CustomCursor /> : null;
+}

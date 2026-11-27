@@ -1,11 +1,20 @@
-import type { Room } from "./types";
+import type { Room, GameLoser } from "./types";
 export type ClientPayloads = {
-    "auth:response": { jwtToken: string; displayName: string };
+    "game:command": import("./distributed/types").Command;
+    "cluster:ping": undefined;
+    "auth:response": {
+        jwtToken: string;
+        displayName: string;
+        sessionToken?: string;
+        expectedInstance?: string;
+    };
     "room:join": undefined;
-    "room:leave": undefined;
+    "room:leave": { requestId: string } | undefined;
     "game:start": undefined;
     "word:success": undefined;
-    currentInput: string;
+    "item:recommend": { itemId: string };
+    "hint:update": { length: number };
+    currentInput: string | { input: string; failed: true };
     "health:ping": string;
     "health:database": string;
     ping: undefined;
@@ -17,9 +26,22 @@ export type WireRoom = Omit<Room, "password"> & {
 export type ServerPayloads = {
     connect: { id: string };
     "auth:request": undefined;
+    "auth:session": { id: string };
+    "room:leave:ack": { requestId: string };
     "room:broadcast": WireRoom;
-    "typing:input": { input: string };
-    "game:end": { holderUserId: string; holderDisplayName?: string };
+    "typing:input": {
+        input: string;
+        failed?: boolean;
+        playerId?: string;
+        focusPlayerId?: string;
+        hintLength?: number;
+    };
+    "hint:updated": { playerId: string; bombId: string; length: number };
+    "game:end": {
+        holderUserId: string;
+        holderDisplayName?: string;
+        losers?: GameLoser[];
+    };
     "game:quited": undefined;
     "health:pong": string;
     "health:database-result": {

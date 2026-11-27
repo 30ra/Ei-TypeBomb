@@ -1,126 +1,131 @@
-# Ei-TypeBomb — Cloudflare Workers
+# Ei-TypeBomb Cloudflare Worker
 
-`../server` の対戦サーバーを Workers + Durable Objects に移植した実装です。
-ルームごとに `GameRoom` を割り当て、参加者・対戦状態を永続化します。
-WebSocket Hibernation とアラームを使用し、休止・復帰をまたいでゲームを継続します。
-Supabase の既存 `ei_typebomb_rooms` テーブルは読み取りのみで使用します。
+Cloudflare Workers + Durable Objects adapters for the existing `backend/shared`
+game engine and authenticated peer WebSocket confirmation protocol.
 
-## ローカル起動
+## Architecture
 
-```sh
-cd backend/cloudflare
-npm ci
-cp .dev.vars.example .dev.vars
-# .dev.vars に実際の値を設定
-npm run dev
-```
+- `src/index.ts`: routes `GET /ws/:roomId` upgrades to a room-specific Durable Object.
+- `src/ClusterDO.ts`: authenticated peer connections, registry and per-room ReplicaDO vote storage.
+- `src/RoomDO.ts`: native WebSocket packets, verified room sessions, game events,
+  durable state, deadline alarms and hibernation-aware connection attachments.
+- `src/lib/auth.ts`: ES256 signature verification and shared room JWT policy.
+- `src/lib/database.ts`: Supabase PostgREST room lookup using the signed room
+  JWT with RLS and a publishable key; no service-role key or direct PostgreSQL credentials.
+- `../shared/`: unchanged game rules, validation, snapshots, item selection and rate limits.
 
-必要な値:
+Each room gets its own Durable Object (SQLite-backed). In standalone mode the initial room document is
+loaded from Supabase after successful room JWT verification. Distributed recovery
+never reloads it; only the primary creating a fresh instance may load settings. Only authenticated
+sockets receive room/game broadcasts. The JWT room ID must match the WebSocket
+URL. A session ID is assigned per connection, stored in its serialized WebSocket
+attachment, and restored after hibernation.
 
-- `JWT_SECRET`: client がルーム入室トークンの署名に使う値と同一。
-- `NEXT_PUBLIC_SUPABASE_URL`: 既存 Supabase プロジェクト URL。
-- `SUPABASE_SERVICE_ROLE_KEY`: サーバー専用キー。ブラウザーには渡さない。
-- `NEXT_PUBLIC_POSTHOG_KEY` / `POSTHOG_HOST`: 任意。未設定時はイベント送信を無効化。
+For efficiency, `currentInput` broadcasts are ephemeral rather than a database
+write per keystroke. Game/room changes and hint updates are persisted. Bomb and
+countdown deadlines use a Durable Object Alarm, not `setTimeout`.
 
-`wrangler.jsonc` の `ALLOWED_ORIGINS` にクライアントの origin をカンマ区切りで指定します。
-初期値は `http://localhost:3000`。パスや末尾スラッシュは含めません。
+## Setup
 
-## クライアントの切り替え
-
-既存 client に共通アダプター `lib/room/socket.ts` を追加済みです。
-クライアント側の環境変数を次のように設定し、開発サーバーを再起動（本番は再ビルド）してください。
-
-```dotenv
-NEXT_PUBLIC_PRIMARY_SERVER_URL=http://localhost:8787/ws
-# 従来の Socket.IO サーバーを予備にする場合
-# NEXT_PUBLIC_BACKUP_SERVER_URL=https://YOUR_EXISTING_SERVER
-```
-
-本番は `https://YOUR_WORKER.workers.dev/ws` またはカスタムドメインの `/ws` にします。
-ブラウザーに接続先の上書きを保存している場合は、そちらも変更してください。
-`NEXT_PUBLIC_RENDER_URL` を参照する表示を使う場合は、その接続先も同様に設定します。
-
-**末尾の `/ws` がプロトコル選択の目印です。** 通常の URL は従来どおり Socket.IO、
-`/ws` 付き URL は標準 WebSocket を使用します。Workers は Socket.IO プロトコルを実装しません。
-外部クライアントは下記仕様に合わせる必要があります。
-異なるサーバー（Workers と従来 server）間で進行中の対戦状態は共有されません。
-
-## デプロイ
-
-### Cloudflare Workers Builds（Git連携）
-
-Worker の **Settings > Build** に以下を設定してください。
-
-| 項目 | 設定値 |
-| --- | --- |
-| Root directory | `backend/cloudflare` |
-| Build command | `npm ci --include=dev && npm run build` |
-| Deploy command | `npm run deploy` |
-
-コマンドは Root directory 内で実行されるので、`cd cloudflare` は付けません。
-`wrangler` は devDependencies にあるため、`--include=dev` でビルド用の依存関係も
-インストールします。`npm run build` は dry-run のみで、公開は Deploy command が行います。
-ビルド対象のブランチに `backend/` への移動が反映されていることも確認してください。
-共通コードの `backend/shared/` は同じリポジトリから読み込みます。
-
-設定仕様: [Workers Builds configuration](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/)。
-
-### CLI
+From `backend/cloudflare`:
 
 ```sh
-cd backend/cloudflare
-npm ci --include=dev
-npx wrangler secret put JWT_SECRET
-npx wrangler secret put NEXT_PUBLIC_SUPABASE_URL
-npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
-# 任意: npx wrangler secret put NEXT_PUBLIC_POSTHOG_KEY
-npm run deploy
-```
-
-デプロイ前に `ALLOWED_ORIGINS` を本番クライアントの origin に変更してください。
-`.dev.vars` はローカル専用で、本番にはアップロードされません。
-初期テンプレートの migration `v1` を残し、`v2` でサンプル `MyDurableObject` を削除して
-`GameRoom` を作成します。サンプル Durable Object に独自データを保存していた場合は、
-削除前に移行してください。既存 Supabase データに変更はありません。
-
-## 通信仕様
-
-- `GET /health` または `/`: 死活監視 JSON。
-- `GET /ws/<ルームUUID>`: WebSocket upgrade。`/ws/health` は未認証の接続確認用。
-- JSON フレーム: `{ "event": "イベント名", "data": ペイロード }`。
-- 接続直後: `connect` (`{id}`)、続いて `auth:request`。
-- `auth:response`: `{jwtToken, displayName}`。HS256 署名・期限・JWT の `id` と接続先ルームの一致を検証。
-  URL には JWT を含めません。認証するまでルーム情報を配信しません。
-- 受信: `room:join`, `room:leave`, `game:start`, `word:success`, `currentInput`（文字列）。
-- 配信: `room:broadcast`, `typing:input`, `game:end`, `game:quited`, `error`。
-- `ping` に `pong` を返します。アダプターは25秒間隔で送信。
-  未認証接続は20秒、認証済みは75秒間応答がないと切断して参加者を除去します。
-
-既存のイベント別トークンバケット制限、表示名上限50文字、入力上限32文字を維持します。
-ゲーム開始3秒後に単語を表示し、設定秒数 + 0〜10秒ごとに爆弾を進め、5回目で終了します。
-プレイヤーが退出・切断すると対戦を中断し参加者をリセットします。
-`room:leave` は観戦接続を残すので、同じ接続から再参加できます。
-観戦者のゲーム開始とカウントダウン中の単語成功は拒否します。
-
-ファイルログ・常駐端末 UI は Workers の構造化 `console` ログに置き換えています。
-PostHog の対戦イベントは `waitUntil` で送信します。既存の Node 向け OTLP ログ転送は移植対象外で、
-必要な場合は Cloudflare 側のログ転送を別途設定してください。
-
-## 検証
-
-```sh
-npm run cf-typegen  # バインディング変更時
+npm install
 npm run typecheck
 npm test
-npm run build      # wrangler deploy --dry-run（公開しない）
+npx wrangler login
 ```
 
-統合テストは Workers ランタイムで WebSocket・認証・DB 応答・人数制限・入力・
-退出・永続化・アラームを検証します。DB 応答には fixture を使うため、本番 DB の書き換えはありません。
-テストプールの Miniflare / Wrangler は overrides で開発用ランタイムと揃えています。
+Set the following as Wrangler secrets:
 
-参考: [WebSocket Hibernation](https://developers.cloudflare.com/durable-objects/best-practices/websockets/)、
-[Durable Object alarms](https://developers.cloudflare.com/durable-objects/api/alarms/)。
+```sh
+npx wrangler secret put JWT_KEY_ID
+npx wrangler secret put JWT_PUBLIC_KEY
+npx wrangler secret put NEXT_PUBLIC_SUPABASE_URL
+npx wrangler secret put NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+```
 
-共通ゲームコアと runtime の境界、deadline と将来の拡張については
-[共通コアのREADME](../shared/README.md) を参照してください。
+Use the same ES256 verification public JWK (JSON) and key ID as the Node
+backend. Set `ALLOWED_ORIGINS` as an optional comma-separated allowlist of
+trusted browser origins, e.g. `https://ei-typebomb.com`. If set, other
+browser origins are rejected at the upgrade boundary.
+
+Deploy using `npm run deploy`. For local development, use `npm run dev`
+with non-production secrets in `.dev.vars` (which must not be committed).
+
+Set the secondary server URL on the frontend to
+`https://<worker-host>/ws`. The existing `WorkerSocket` will translate it
+to a native `wss://<worker-host>/ws/<roomId>` connection and send
+`{ "event": "...", "data": ... }` packets.
+
+Routes:
+
+- `GET /health`: basic HTTP process health.
+- `GET /ws/health`: WebSocket health session; `health:ping` / `health:pong`.
+- `GET /ws/:roomId`: native WebSocket game session.
+
+## Cloudflare Worker Previews
+
+Cloudflare Workers Builds uses `npx wrangler preview` for preview branches.
+Preview deployments require a `previews` block in `wrangler.jsonc`; settings
+in production are **not automatically inherited**.
+
+The configuration includes a separate `ROOMS` binding in the `previews`
+block. Cloudflare creates a separate Durable Object namespace and storage
+for each Preview while keeping the `RoomDO` class migration at the top level.
+
+The preview variables are **public configuration values** used by the Worker,
+including the JWT **public** verification key and the Supabase publishable
+key. Do not add a JWT private signing key, Supabase service-role key, or other
+secret to `previews.vars` or to version control. If the JWT signing key
+rotates, update the Preview public JWK and its key ID at the same time.
+
+```sh
+cd backend/cloudflare
+npx wrangler preview
+```
+
+**Important:** The Preview's Durable Object storage is isolated, but the
+preview Supabase endpoint is currently the shared rcAccount production project.
+A Preview can still read or write data through the application's normal
+Supabase permissions. Avoid destructive test data and restrict public Preview
+URLs (for example with Cloudflare Access) before using real accounts.
+The CORS allowlist accepts both the legacy subdomain and `ei-typebomb.com`.
+Production bindings and dashboard-managed production secrets are unchanged.
+
+## Limitations
+
+- Standalone deployments remain independent. Configured distributed deployments
+  share stable tab identities and fenced durable checkpoints with Node.
+  [Distributed setup and limitations](../DISTRIBUTED.md) describe the required migration/secrets.
+- Durable Object alarms guarantee wake-up, not an exact millisecond firing
+  time. The shared core uses epoch deadlines, so late alarms apply current
+  elapsed time rather than restarting timers.
+- Current health endpoint checks transport RTT, not database readiness.
+- Server-side game rules are currently the same as Node's: typed answers are
+  validated by the client, and the server handles `word:success` events.
+- `npm run typecheck` and `npm test` require dependencies to be installed;
+  deployment also requires an authorized Cloudflare account and valid secrets.
+
+## Reconnection
+
+Clients can resume their tab-specific, signed player identity on the **same**
+Durable Object during a 20s disconnect grace period. Pending leaves are
+persisted and scheduled using Durable Object alarms. In distributed mode,
+the shared runtime migrates games from Node using the local checkpoints and best-effort voting replicas;
+replicas never advance a game before acquiring its fenced ownership.
+
+For deployment, use the same `ETB_CLUSTER_CONFIG` JSON on Worker, Node servers and Vercel. The `/ws` endpoint marks the Worker transport. A sole Worker entry is selected automatically; set `SERVER_PUBLIC_URL` if multiple Worker entries exist. Server-specific signing keys and `CLUSTER_SERVER_TOKEN` authentication are removed; public declarations do not authenticate peers. Retain ClusterDO voting state. Player JWT authentication remains required. See [distributed setup](../DISTRIBUTED.md).
+
+## Config-scoped Durable Objects
+
+The CURRENT `ETB_CLUSTER_CONFIG` defines the namespace for the distributed
+`CLUSTER`, `REPLICAS` and `ROOMS` Durable Object IDs. Changing the server
+list/order creates fresh IDs instead of reading the former stored declaration,
+boot or votes. A repeated deploy of the same list retains those records.
+Standalone `ROOMS` names are unchanged. Old namespaces are not deleted.
+
+**Finish active rooms and coordinate the config change across all nodes and
+Vercel before deploying**: a different topology is not an in-place migration
+for running games. To verify the startup, check both `/health` and
+`/cluster/identity` (the latter initializes `ClusterDO`).

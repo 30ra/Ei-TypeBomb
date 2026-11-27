@@ -1,17 +1,27 @@
-export interface Secrets {
-	JWT_SECRET: string;
-	NEXT_PUBLIC_SUPABASE_URL: string;
-	SUPABASE_SERVICE_ROLE_KEY: string;
-	NEXT_PUBLIC_POSTHOG_KEY?: string;
-	POSTHOG_HOST?: string;
+import type { RoomDO } from "./RoomDO";
+import type { ClusterDO, ReplicaDO } from "./ClusterDO";
+export interface Env {
+    CLUSTER: DurableObjectNamespace<ClusterDO>;
+    REPLICAS: DurableObjectNamespace<ReplicaDO>;
+    CLUSTER_DRAINING?: string;
+    ROOMS: DurableObjectNamespace<RoomDO>;
+    ETB_CLUSTER_CONFIG?: string;
+    ETB_ONLINE_LEARNING_DIAGNOSTICS?: string;
+    JWT_KEY_ID: string;
+    JWT_PUBLIC_KEY: string;
+    NEXT_PUBLIC_SUPABASE_URL: string;
+    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: string;
+    // Optional comma-separated list of browser origins allowed to connect.
+    ALLOWED_ORIGINS?: string;
+    SERVER_PUBLIC_URL?: string;
 }
-export type WorkerEnv = Env & Secrets;
-export type { User, TypedRecallItem, Item, Room, GameState } from '../../shared/types';
+
 export type Session = {
-	id: string;
-	roomId: string;
-	displayName?: string;
-	authenticated: boolean;
-	lastSeen: number;
-	buckets: Record<string, { tokens: number; updatedAt: number }>;
+    id: string;
+    connectionId?: string;
+    roomId: string | null;
+    targetRoomId: string;
+    displayName?: string;
+    recommendedItemId?: string;
+    diagnosticAttempt?: { key: string; itemId: string } | null;
 };

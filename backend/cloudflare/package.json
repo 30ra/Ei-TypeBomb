@@ -1,32 +1,25 @@
 {
-	"name": "cloudflare",
-	"version": "0.0.0",
-	"private": true,
-	"scripts": {
-		"deploy": "wrangler deploy",
-		"dev": "wrangler dev",
-		"start": "wrangler dev",
-		"cf-typegen": "wrangler types",
-		"typecheck": "tsc --noEmit",
-		"test": "vitest run",
-		"build": "wrangler deploy --dry-run"
-	},
-	"devDependencies": {
-		"@cloudflare/vitest-pool-workers": "^0.22.0",
-		"@types/node": "^26.6.3",
-		"prettier": "^3.9.9",
-		"typescript": "^5.5.2",
-		"vitest": "^4.1.11",
-		"wrangler": "^4.143.0"
-	},
-	"dependencies": {
-		"@supabase/supabase-js": "2.110.8",
-		"jose": "^6.2.12"
-	},
-	"overrides": {
-		"@cloudflare/vitest-pool-workers": {
-			"miniflare": "5.20260926.0-alpha",
-			"wrangler": "4.143.0"
-		}
-	}
+    "name": "ei-typebomb-cloudflare",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "wrangler dev",
+        "deploy": "wrangler deploy",
+        "typecheck": "tsc --noEmit",
+        "test": "tsx --test test/*.test.ts",
+        "test:integration": "ETB_TEST_PERSISTENT_PEER_STORAGE=true tsx --test test/*.integration.mjs"
+    },
+    "dependencies": {
+        "jose": "^6.2.18"
+    },
+    "devDependencies": {
+        "@cloudflare/workers-types": "^5.20261121.1",
+        "esbuild": "0.28.2",
+        "miniflare": "5.20261012.1-beta",
+        "playwright": "^1.65.1",
+        "tsx": "^4.23.15",
+        "typescript": "^5.9.3",
+        "wrangler": "^4.166.0"
+    }
 }
