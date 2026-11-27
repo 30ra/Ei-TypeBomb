@@ -167,6 +167,9 @@ export default function RoomList({
             size="xlarge"
             title={viewTitle}
         >
+            <Button href="/solo" navigation="push">
+                ひとりで対戦
+            </Button>
             <div className="flex w-full items-center justify-between gap-4">
                 <Input
                     value={keyword}

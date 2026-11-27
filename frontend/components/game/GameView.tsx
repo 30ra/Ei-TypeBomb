@@ -6,6 +6,10 @@ import { getQuestionSlideDistance } from "@/components/game/question-slide-dista
 import type { ReactNode, Ref } from "react";
 import ItemView from "@/components/recall/ItemView";
 import UsersView from "@/components/game/UsersView";
+import {
+    clearWrongAnswerAnimation,
+    playWrongAnswerAnimation,
+} from "@/components/game/wrong-answer-animation";
 import Button from "@/components/ui/Button";
 import PlayAgainButton from "@/components/game/PlayAgainButton";
 import type { GameBomb, Item, Position, Room, User } from "@/type";
@@ -148,24 +152,7 @@ export default function GameView({
 
     const activeGameRef = useRef<HTMLDivElement>(null);
     const triggerFailAnimation = useCallback(() => {
-        const element = activeGameRef.current;
-        if (!element) return;
-
-        // Rewind an in-flight shake so consecutive errors each give feedback.
-        const animations = element.getAnimations();
-        if (
-            animations.length > 0 &&
-            element.classList.contains("wrong-answer")
-        ) {
-            animations.forEach((animation) => {
-                animation.currentTime = 0;
-            });
-        } else {
-            element.classList.remove("wrong-answer");
-            // Restart the animation when a previous run has already finished.
-            void element.offsetWidth;
-            element.classList.add("wrong-answer");
-        }
+        playWrongAnswerAnimation(activeGameRef.current);
     }, []);
 
     const failureKey = `${currentItem?.id ?? ""}:${currentTurn}:${itemPresentationKey}`;
@@ -289,13 +276,7 @@ export default function GameView({
             <div
                 ref={activeGameRef}
                 className="flex h-full items-center justify-center flex-col gap-2 w-full"
-                onAnimationEnd={(event) => {
-                    if (
-                        event.target === event.currentTarget &&
-                        event.animationName === "wrongAnswer"
-                    )
-                        event.currentTarget.classList.remove("wrong-answer");
-                }}
+                onAnimationEnd={clearWrongAnswerAnimation}
             >
                 {fullWidthQuestion && masteryProgress ? (
                     <div className="w-full max-w-3xl px-4">

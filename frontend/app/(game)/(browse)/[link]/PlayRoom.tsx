@@ -25,7 +25,7 @@ import { getRoomStatusFromId } from "@/lib/room/get";
 import { signInToRoom } from "@/lib/room/auth";
 import posthog from "posthog-js";
 
-type PlayMode = "online" | "offline";
+type PlayMode = "online" | "offline" | "solo";
 const validDisplayName = (name: string) =>
     name.trim().length > 0 &&
     name.trim().length <= 50 &&
@@ -112,7 +112,7 @@ export default function PlayRoom({
         router.push(
             mode === "offline"
                 ? "/" + link + "/offline?answerMode=" + selectedAnswerMode
-                : "/" + link + "/online",
+                : "/" + link + "/" + mode,
         );
     };
 
@@ -138,7 +138,7 @@ export default function PlayRoom({
                     password: showPasswordField ? roomPassword : "",
                 },
                 turnstileToken,
-                mode,
+                mode === "solo" ? undefined : mode,
             );
 
             if (result === null) {
@@ -196,7 +196,7 @@ export default function PlayRoom({
 
     const renderModeDialog = (mode: PlayMode) => {
         const isOnline = mode === "online";
-        const title = isOnline ? "表示名" : "出題形式";
+        const title = isOnline ? "表示名" : mode === "offline" ? "出題形式" : "ひとりで対戦";
         const isActive = activeDialog === mode;
 
         return (
@@ -229,9 +229,9 @@ export default function PlayRoom({
                         className="w-full"
                         variant="primary"
                         iconName={isOnline ? "users" : "user"}
-                        disabled={roomLoading || itemCount === 0}
+                        disabled={roomLoading || itemCount === 0 || (mode === "solo" && !hasTypingAnswers)}
                     >
-                        {isOnline ? "オンライン" : "オフライン"}
+                        {isOnline ? "オンライン" : mode === "offline" ? "オフライン" : "ひとりで対戦"}
                     </Button>
                 }
                 title={title}
@@ -239,10 +239,14 @@ export default function PlayRoom({
                     showPasswordField && !alreadyAuthorized
                         ? isOnline
                             ? "表示名とパスワードを入力してください。"
-                            : "出題形式とパスワードを入力してください。"
+                            : mode === "offline"
+                              ? "出題形式とパスワードを入力してください。"
+                              : "パスワードを入力してください。"
                         : isOnline
                           ? "表示名を入力してください。"
-                          : "出題形式を選択してください。"
+                          : mode === "offline"
+                            ? "出題形式を選択してください。"
+                            : "このルームの単語で連戦します。"
                 }
                 alignment="vertical"
                 size="middle"
@@ -260,7 +264,7 @@ export default function PlayRoom({
                         disabled={joining !== null}
                     />
                 )}
-                {!isOnline && (
+                {mode === "offline" && (
                     <div className="w-full flex flex-col gap-2">
                         <Selection
                             items={availableAnswerModes.map(
@@ -318,6 +322,7 @@ export default function PlayRoom({
                 <div className="grid w-full grid-cols-2 gap-4">
                     {renderModeDialog("online")}
                     {renderModeDialog("offline")}
+                    {renderModeDialog("solo")}
                 </div>
             )}
 
