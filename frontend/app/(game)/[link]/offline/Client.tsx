@@ -1,4 +1,5 @@
 "use client";
+import { createSpeechLanguageResolver } from "@/lib/speech-language";
 import { getMasteryGraph } from "@/lib/playground/mastery-graph";
 import { LEARNING_DIAGNOSTICS_ENABLED, captureDecision, diagnosticJSON, type CapturedDecision, type AnswerEvent } from "@/lib/playground/diagnostics";
 import { getSignInUrl } from "@/lib/auth/sign-in-url";
@@ -44,11 +45,11 @@ import {
     startMemorySync,
 } from "@/lib/playground/memory-client";
 import { Icon } from "@/components/ui/Icon";
-import { getEffectiveAnswerMode, getTypingAnswer, type AnswerMode } from "@/lib/answer-mode";
+import { getEffectiveAnswerMode, getTypingAnswer, getRecognitionChoiceCount, toLearningAnswerMode, type OfflineAnswerMode } from "@/lib/answer-mode";
 
 type Props = {
     room: Room;
-    answerMode: AnswerMode;
+    answerMode: OfflineAnswerMode;
     initialBackgroundMusic: boolean;
     initialSounDeffects: boolean;
 };
@@ -158,11 +159,12 @@ const clampTypingDelay = (delayMs: number) =>
 
 export default function Client({
     room: sourceRoom,
-    answerMode,
+    answerMode: requestedAnswerMode,
     initialBackgroundMusic,
     initialSounDeffects,
 }: Readonly<Props>) {
     const router = useRouter();
+    const answerMode = toLearningAnswerMode(requestedAnswerMode);
 
     const [backgroundMusic, setBackgroundMusic] = useState(
         initialBackgroundMusic,
@@ -204,10 +206,14 @@ export default function Client({
         [sourceRoom],
     );
     const items = useMemo(() => room.items ?? [], [room.items]);
+    const getSpeechLanguage = useMemo(() => createSpeechLanguageResolver(items), [items]);
     const masteryItemIds = useMemo(() => items.map(item => item.id), [items]);
     const itemModes = useMemo(() => Object.fromEntries(items.map(item =>
         [item.id, getEffectiveAnswerMode(item, answerMode)])), [items, answerMode]);
-    const choiceCount = useMemo(() => new Set(items.map(item => item.answer).filter(Boolean)).size, [items]);
+    const choiceCount = useMemo(() => getRecognitionChoiceCount(
+        requestedAnswerMode,
+        new Set(items.map(item => item.answer).filter(Boolean)).size,
+    ), [items, requestedAnswerMode]);
 
 
     const [memoryByItem, setMemoryByItem] = useState<
@@ -241,6 +247,7 @@ export default function Client({
 
     const sessionTurnNumberRef = useRef(0);
     const [itemPresentationKey, setItemPresentationKey] = useState(0);
+    const [slidePresentationKey, setSlidePresentationKey] = useState<number | null>(null);
     const recallProgressRef = useRef<RecallProgress | null>(null);
     const [isSignedIn, setIsSignedIn] = useState(false);
     const userReviewCountRef = useRef(0);
@@ -394,7 +401,7 @@ export default function Client({
         };
     }, [room.id, items, answerMode]);
 
-    const setTrackedItem = useCallback((item: Item | null) => {
+    const setTrackedItem = useCallback((item: Item | null, slide = false) => {
         currentItemRef.current = item;
         setCurrentItem(item);
         recallProgressRef.current = null;
@@ -402,6 +409,7 @@ export default function Client({
 
         sessionTurnNumberRef.current += 1;
         setItemPresentationKey(sessionTurnNumberRef.current);
+        setSlidePresentationKey(slide ? sessionTurnNumberRef.current : null);
         const memory = memoryByItemRef.current[item.id];
         predictedRetrievabilityAtPromptRef.current =
             memory && memory.reviewCount > 0 && memory.lastReviewedAt
@@ -863,7 +871,7 @@ export default function Client({
             const utterance = new SpeechSynthesisUtterance(
                 presentedItem.answer,
             );
-            utterance.lang = "en-US";
+            utterance.lang = getSpeechLanguage(presentedItem.answer, "answer", window.navigator?.language);
             answerSpeechRef.current = utterance;
             const finishAnswerSpeech = () => {
                 if (answerSpeechRef.current !== utterance) return;
@@ -878,7 +886,7 @@ export default function Client({
         setCurrentInput("");
         previousInputAtRef.current = null;
         previousInputLengthRef.current = 0;
-        setTrackedItem(resolveTurnWithItem());
+        setTrackedItem(resolveTurnWithItem(), true);
 
         posthog.capture(
             wasAnswerRevealed ? "word_reviewed" : "word_succeeded",
@@ -888,6 +896,7 @@ export default function Client({
         isPaused,
         soundEffects,
         readAnswer,
+        getSpeechLanguage,
         resolveTurnWithItem,
         room.id,
         setTrackedItem,
@@ -923,7 +932,7 @@ export default function Client({
         synthesis.cancel();
 
         const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = "ja-JP";
+        utterance.lang = getSpeechLanguage(text, "prompt", window.navigator?.language);
         synthesis.speak(utterance);
 
         // Do not cancel the answer utterance when the item changes.
@@ -935,6 +944,7 @@ export default function Client({
         isStarted,
         itemPresentationKey,
         readQuestion,
+        getSpeechLanguage,
         voiceSettingsReady,
         isPaused,
         answerSpeechVersion,
@@ -1039,6 +1049,7 @@ export default function Client({
                 bombStatus={0}
                 currentItem={currentItem}
                 itemPresentationKey={itemPresentationKey}
+                slideQuestion={slidePresentationKey === itemPresentationKey}
                 currentInput={currentInput}
                 isStarted={isStarted}
                 preGameContent={
@@ -1085,26 +1096,41 @@ export default function Client({
                             aria-labelledby="offline-instructions-title"
                         >
                             <div className="flex flex-col gap-4">
-                                <div className="flex gap-2">
-                                    <span className="shrink-0">
-                                        <Icon name="keyboard" />
-                                    </span>
-                                    <span data-cursor="text">
-                                        入力問題では、英語・日本語ともに
-                                        <strong>半角</strong>
-                                        で入力してください。
-                                    </span>
-                                </div>
-                                <div className="flex gap-2">
-                                    <span className="shrink-0">
-                                        <Icon name="lightbulb" />
-                                    </span>
-                                    <span data-cursor="text">
-                                        オフラインプレイの場合は、
-                                        <strong>スペースキーを2回押す</strong>
-                                        と解答を見ることができます。
-                                    </span>
-                                </div>
+                                {requestedAnswerMode === "card" ? (
+                                    <div className="flex gap-2">
+                                        <span className="shrink-0">
+                                            <Icon name="lightbulb" />
+                                        </span>
+                                        <span data-cursor="text">
+                                            斜線部分をタップ、またはEnterキーで解答を表示します。
+                                            不正解は左矢印キーまたは1、正解は右矢印キーまたは2で選択できます。
+                                            分からない場合はスペースキーを2回押してください。
+                                        </span>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div className="flex gap-2">
+                                            <span className="shrink-0">
+                                                <Icon name="keyboard" />
+                                            </span>
+                                            <span data-cursor="text">
+                                                入力問題では、英語・日本語ともに
+                                                <strong>半角</strong>
+                                                で入力してください。
+                                            </span>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <span className="shrink-0">
+                                                <Icon name="lightbulb" />
+                                            </span>
+                                            <span data-cursor="text">
+                                                オフラインプレイの場合は、
+                                                <strong>スペースキーを2回押す</strong>
+                                                と解答を見ることができます。
+                                            </span>
+                                        </div>
+                                    </>
+                                )}
                                 {!isSignedIn && (
                                     <div className="flex gap-2">
                                         <span className="shrink-0">
@@ -1140,7 +1166,7 @@ export default function Client({
                 result={null}
                 soloMode
                 isPaused={isPaused}
-                answerMode={answerMode}
+                answerMode={requestedAnswerMode}
                 masteryProgress={
                     <OfflineMasteryProgress
                         progress={masteryGraph.totals}
@@ -1187,7 +1213,7 @@ export default function Client({
                     </Button>
                 }
             />
-            <header className="w-full flex absolute justify-end p-4 gap-4">
+            <header className="absolute top-0 right-0 flex justify-end p-4 gap-4">
                 <Button
                     iconName="pause"
                     padding="small"

@@ -1,11 +1,9 @@
 import { notFound, redirect } from "next/navigation";
-import Shell from "@/components/layout/Shell";
+import RoomDetailShell from "./RoomDetailShell";
 import { Icon } from "@/components/ui/Icon";
 import { getRoomPageDataFromLink } from "@/lib/room/get";
 import PlayRoom from "./PlayRoom";
-import RoomPasswordGate from "./RoomPasswordGate";
 import RoomShareActions from "./RoomShareActions";
-import RoomNavigation from "@/components/rooms/RoomNavigation";
 import { getTypingAnswer } from "@/lib/answer-mode";
 
 export default async function RoomPage({
@@ -18,19 +16,13 @@ export default async function RoomPage({
     if (!result) notFound();
     if (link !== result.link) redirect("/" + result.link);
 
-    if (result.requiresPassword && !result.authorized) {
-        return (
-            <>
-                <Shell title="パスワードを入力" size="medium" animateAppear>
-                    <RoomPasswordGate roomId={result.id} />
-                </Shell>
-            </>
-        );
-    }
+    // Layouts and pages render independently. Never include protected room
+    // details in a page response until the room itself authorizes access.
+    if (result.requiresPassword && !result.authorized) return null;
 
     if (!result.room) notFound();
 
-    const { room, itemCount, isOwner, isSignedIn } = result;
+    const { room, itemCount, isOwner } = result;
     const title = room.title || "ルーム";
     const items = room.items ?? [];
     const hasTypingAnswers = items.some(
@@ -38,13 +30,7 @@ export default async function RoomPage({
     );
 
     return (
-        <Shell
-            sidebar={<RoomNavigation isSignedIn={isSignedIn} />}
-            title={title}
-            className="grid lg:grid-cols-2 gap-4 px-4"
-            showBackButton
-            size="xlarge"
-        >
+        <RoomDetailShell title={title} roomId={result.id}>
             <section className="w-full flex-col flex gap-4">
                 <div className="flex w-full p-4 flex-col gap-4 rounded-lg bg-(--color-background-secondary)">
                     {room.explanation && (
@@ -143,6 +129,6 @@ export default async function RoomPage({
                     </p>
                 )}
             </section>
-        </Shell>
+        </RoomDetailShell>
     );
 }

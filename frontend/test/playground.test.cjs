@@ -1192,6 +1192,7 @@ test("solo answer speech plays after success, including after a full hint", () =
     for (const scenario of [
         { readAnswer: true, revealed: false, expected: ["apple"] },
         { readAnswer: true, revealed: true, expected: ["apple"] },
+        { readAnswer: true, revealed: false, answer: "こんにちは", lang: "ja-JP", expected: ["こんにちは"] },
         { readAnswer: false, revealed: false, expected: [] },
     ]) {
         const spoken = [];
@@ -1214,13 +1215,18 @@ test("solo answer speech plays after success, including after a full hint", () =
         const callback = getCallback("handleSuccess", {
             window: { speechSynthesis: synthesis },
             SpeechSynthesisUtterance: Utterance,
+            getSpeechLanguage: (text, side) => {
+                assert.equal(text, scenario.answer ?? "apple");
+                assert.equal(side, "answer");
+                return scenario.lang ?? "en-US";
+            },
             isPaused: false,
             readAnswer: scenario.readAnswer,
             answerSpeechRef,
             setAnswerSpeechVersion: (update) => { speechVersion = update(speechVersion); },
             soundEffects: false,
             successAudioRef: { current: null },
-            currentItemRef: { current: { id: "a", answer: "apple" } },
+            currentItemRef: { current: { id: "a", answer: scenario.answer ?? "apple" } },
             recallProgressRef: {
                 current: { answerWasFullyRevealed: scenario.revealed },
             },
@@ -1228,7 +1234,10 @@ test("solo answer speech plays after success, including after a full hint", () =
             previousInputAtRef: { current: null },
             previousInputLengthRef: { current: 0 },
             resolveTurnWithItem: () => ({ id: "b" }),
-            setTrackedItem: (item) => nextItems.push(item.id),
+            setTrackedItem: (item, slide) => {
+                assert.equal(slide, true, "successful answers opt into a slide");
+                nextItems.push(item.id);
+            },
             posthog: { capture: () => {} },
             room: { id: "r" },
         });
@@ -1236,7 +1245,7 @@ test("solo answer speech plays after success, including after a full hint", () =
         assert.deepEqual(spoken.map(([text]) => text), scenario.expected);
         assert.deepEqual(nextItems, ["b"], "the next prompt belongs to the same player");
         if (scenario.expected.length) {
-            assert.equal(spoken[0][1], "en-US");
+            assert.equal(spoken[0][1], scenario.lang ?? "en-US");
             assert.equal(answerSpeechRef.current, utterances[0]);
             assert.equal(speechVersion, 0, "answer completion has not occurred yet");
             utterances[0].onend();
@@ -1477,6 +1486,7 @@ test("actual solo Client callbacks cover all words and keep practicing without a
         for (const setter of [
             "setCurrentItem",
             "setItemPresentationKey",
+            "setSlidePresentationKey",
             "setMemoryByItem",
             "setMasteryNow",
             "setCurrentInput",
@@ -2169,4 +2179,249 @@ test("single-option Client answers persist exposure without recognition credit",
     assert.equal(records.current.single.lastReviewedAt, null);
     assert(Number.isFinite(Date.parse(records.current.single.lastPresentedAt)));
     assert.equal(scheduler.chooseNextUserItem(state, records.current).itemId, item.id);
+});
+
+test("offline question transitions are requested only after success", () => {
+    const source = fs.readFileSync(
+        path.join(root, "app/(game)/[link]/offline/Client.tsx"),
+        "utf8",
+    );
+    assert.match(source, /setTrackedItem\(resolveTurnWithItem\(\), true\)/);
+    assert.match(source, /setTrackedItem\(resolveTurnWithItem\(\)\);/);
+    assert.match(source, /setSlidePresentationKey\(slide \? sessionTurnNumberRef\.current : null\)/);
+    assert.match(source, /slideQuestion=\{slidePresentationKey === itemPresentationKey\}/);
+});
+
+test("repeated presentations of the same item get distinct transition keys", () => {
+    const keys = [];
+    const slides = [];
+    const callback = getCallback("setTrackedItem", {
+        currentItemRef: { current: null },
+        setCurrentItem: () => {},
+        recallProgressRef: { current: null },
+        sessionTurnNumberRef: { current: 0 },
+        setItemPresentationKey: (key) => keys.push(key),
+        setSlidePresentationKey: (key) => slides.push(key),
+        memoryByItemRef: { current: {} },
+        predictedRetrievabilityAtPromptRef: { current: null },
+        exposureGapAtStartRef: { current: null },
+        expectedTypingAtStartRef: { current: 0 },
+        itemModes: {},
+        answerMode: "input",
+        getExposureGap: () => null,
+        getTypingAnswer: (item) => item.answer,
+        userTypingDelayRef: { current: 220 },
+    });
+    const item = { id: "same", answer: "apple" };
+    callback(item);
+    callback(item, true);
+    callback(item, true);
+    callback(item);
+    assert.deepEqual(keys, [1, 2, 3, 4]);
+    assert.deepEqual(slides, [null, 2, 3, null]);
+});
+
+test("shared slide motion scales to the rendered width", () => {
+    const { slideFrames } = load("components/layout/slide-motion.ts");
+    const positions = (phase, width) => Array.from(slideFrames(phase, width), frame => frame.transform);
+    assert.deepEqual(positions("push-in", 320), ["translateX(320px)", "translateX(0)"]);
+    assert.deepEqual(positions("under-out", 320), ["translateX(0)", "translateX(-160px)"]);
+    assert.deepEqual(positions("push-in", 448), ["translateX(448px)", "translateX(0)"]);
+    assert.deepEqual(positions("pop-out", 448), ["translateX(0)", "translateX(448px)"]);
+});
+
+test("navigation and local question slides read the same duration and offset tokens", () => {
+    const readLayout = (file) => fs.readFileSync(path.join(root, "components/layout", file), "utf8");
+    const css = readLayout("slide-motion.css");
+    const tokens = Object.fromEntries(Array.from(css.matchAll(/(--etb-slide-[\w-]+):\s*([^;]+);/g), match => [match[1], match[2]]));
+    const { getSlideMotion, slideFrames } = load("components/layout/slide-motion.ts", {
+        document: { documentElement: {} },
+        getComputedStyle: () => ({
+            getPropertyValue: (name) => tokens[name] ?? "",
+        }),
+    });
+    const defaults = getSlideMotion();
+    assert.equal(defaults.timing.duration, 400);
+    assert.equal(defaults.timing.easing, tokens["--etb-slide-easing"]);
+    assert.equal(defaults.offset, 0.5);
+    tokens["--etb-slide-duration"] = "0.25s";
+    tokens["--etb-slide-offset"] = "0.25";
+    const changed = getSlideMotion();
+    assert.equal(changed.timing.duration, 250);
+    assert.equal(slideFrames("under-out", 320, changed.offset)[1].transform, "translateX(-80px)");
+    assert.match(readLayout("navigation.css"), /animation-duration: var\(--etb-slide-duration\)/);
+    assert.match(readLayout("Navigation.tsx"), /const \{ timing, offset \} = getSlideMotion\(\)/);
+    assert.match(readLayout("SlideTransition.tsx"), /const \{ timing, offset \} = getSlideMotion\(\)/);
+    assert.doesNotMatch(fs.readFileSync(path.join(root, "components/game/GameView.tsx"), "utf8"), /duration=\{200\}/);
+});
+
+test("solo slides clip at the game edges independently of the centered content width", () => {
+    const game = fs.readFileSync(path.join(root, "components/game/GameView.tsx"), "utf8");
+    const slide = fs.readFileSync(path.join(root, "components/layout/SlideTransition.tsx"), "utf8");
+    assert.match(game, /const\s+fullWidthQuestion\s*=\s*soloMode\s*&&\s*isStarted\s*&&\s*currentItem\s*!==\s*null\s*&&\s*!!room\s*&&\s*!serverError/);
+    assert.match(game, /w-full \$\{fullWidthQuestion \? "" : "max-w-3xl px-4"\}/);
+    assert.match(game, /fullWidthQuestion \? "px-4"/);
+    assert.match(game, /<div\s+className="w-full max-w-3xl px-4">\s*\{masteryProgress\}\s*<\/div>/);
+    assert.match(game, /contentClassName="max-w-3xl"/);
+    assert.match(game, /getDistance=\{getQuestionSlideDistance\}/);
+    assert.match(slide, /w-full flex-col overflow-x-clip/);
+    assert.match(slide, /mx-auto flex h-full min-w-0 w-full flex-col/);
+    assert.match(slide, /left: "50%"/);
+    assert.match(slide, /marginLeft: `\$\{-width \/ 2\}px`/);
+    assert.match(slide, /slideFrames\("push-in", customDistance \?\? live\.offsetWidth, offset\)/);
+    assert.match(slide, /slideFrames\("under-out", customDistance \?\? width, offset\)/);
+});
+
+test("question slide distance uses the widest visible question element and both gutters", () => {
+    let desktop = true;
+    const { getQuestionSlideDistance } = load("components/game/question-slide-distance.ts", {
+        window: { matchMedia: () => ({ matches: desktop }) },
+        getComputedStyle: () => ({ paddingLeft: "16px", paddingRight: "16px" }),
+    });
+    const make = (width, ...parts) => ({
+        offsetWidth: width,
+        querySelector: () => ({
+            querySelectorAll: () => parts.map(offsetWidth => ({ offsetWidth })),
+        }),
+    });
+    assert.equal(getQuestionSlideDistance(make(768, 300, 512)), 544);
+    assert.equal(getQuestionSlideDistance(make(768, 620, 512)), 652);
+    assert.equal(getQuestionSlideDistance(make(768, 100, 160)), 192);
+    assert.equal(getQuestionSlideDistance(make(640, 640)), 640);
+    assert.equal(getQuestionSlideDistance(make(768)), 768);
+    desktop = false;
+    assert.equal(getQuestionSlideDistance(make(390, 100, 200)), 390);
+});
+
+test("slide cursor uses destination geometry and restores animated transforms", async () => {
+    let transform = "translateX(12px)";
+    let priority = "";
+    let refreshes = 0;
+    let finish;
+    const animation = { playState: "running", finished: new Promise(resolve => { finish = resolve; }) };
+    const rect = { left: 100, top: 20, width: 80, height: 30 };
+    const button = { closest: () => button, getBoundingClientRect: () => rect };
+    const element = {
+        isConnected: true,
+        animate: () => animation,
+        style: {
+            getPropertyValue: () => transform,
+            getPropertyPriority: () => priority,
+            setProperty: (_name, value, important = "") => { transform = value; priority = important; },
+            removeProperty: () => { transform = ""; priority = ""; },
+        },
+    };
+    const cursor = load("components/layout/slide-cursor.ts", {
+        window: { dispatchEvent: () => { refreshes++; } },
+        Event: class {},
+        document: {
+            elementFromPoint: () => {
+                assert.equal(transform, "none");
+                assert.equal(priority, "important");
+                return button;
+            },
+        },
+    });
+    cursor.animateSlideEntrance(element, [], {});
+    assert.equal(refreshes, 1, "refresh happens at animation start");
+    assert.equal(cursor.getSlideCursorTarget(120, 30).rect, rect);
+    assert.equal(transform, "translateX(12px)");
+    assert.equal(priority, "");
+    assert.equal(cursor.isSlideCursorActive(), true);
+    finish();
+    await Promise.resolve();
+    assert.equal(cursor.isSlideCursorActive(), false);
+    assert.equal(refreshes, 2);
+});
+
+test("native slide cursor resolves the new DOM when captured content cannot be hit", () => {
+    const rect = { left: 100, top: 20, right: 180, bottom: 50, width: 80, height: 30 };
+    const button = {
+        closest: selector => selector.includes("inert") ? null : button,
+        getClientRects: () => [rect],
+        getBoundingClientRect: () => rect,
+    };
+    const cursor = load("components/layout/slide-cursor.ts", {
+        window: { dispatchEvent: () => {} },
+        Event: class {},
+        getComputedStyle: () => ({ visibility: "visible", pointerEvents: "auto" }),
+        document: { elementFromPoint: () => null, querySelectorAll: () => [button] },
+    });
+    cursor.beginNativeSlideCursor();
+    assert.equal(cursor.getSlideCursorTarget(120, 30).element, button);
+    assert.equal(cursor.getSlideCursorTarget(90, 30), null);
+    cursor.endNativeSlideCursor();
+    assert.equal(cursor.getSlideCursorTarget(120, 30), null);
+});
+
+test("shared morph rectangles interpolate both axes and retarget without jumping", () => {
+    const { interpolateMorphRect, sameMorphRect } = load("components/layout/morph-motion.ts");
+    const start = { x: 20, y: 100, width: 300, height: 120 };
+    const target = { x: 10, y: 20, width: 700, height: 520 };
+    const middle = interpolateMorphRect(start, target, 0.5);
+    assert.deepEqual({ ...middle }, { x: 15, y: 60, width: 500, height: 320 });
+    const resized = { ...target, height: 620 };
+    assert.equal(sameMorphRect(target, resized), false);
+    assert.deepEqual({ ...interpolateMorphRect(middle, resized, 0) }, { ...middle });
+    assert.deepEqual({ ...interpolateMorphRect(middle, resized, 1) }, resized);
+});
+
+test("page morph keeps the same eased curve for a fixed target", () => {
+    const { advanceMorphRect, interpolateMorphRect } = load("components/layout/morph-motion.ts");
+    const origin = { x: 20, y: 100, width: 300, height: 120 };
+    const target = { x: 10, y: 20, width: 700, height: 520 };
+    let state = { rect: origin, progress: 0 };
+    for (const progress of [0.1, 0.35, 0.7, 0.91, 1]) {
+        state = advanceMorphRect(state.rect, target, state.progress, progress);
+        const expected = interpolateMorphRect(origin, target, progress);
+        for (const key of Object.keys(expected)) assert.ok(Math.abs(state.rect[key] - expected[key]) < 1e-9);
+        assert.equal(state.progress, progress);
+    }
+});
+
+test("page morph advances even when its destination changes every frame", () => {
+    const { advanceMorphRect } = load("components/layout/morph-motion.ts");
+    let state = { rect: { x: 0, y: 0, width: 100, height: 50 }, progress: 0 };
+    for (let i = 1; i <= 20; i++) {
+        const target = { x: 200 + i, y: 100 + i, width: 500 + i, height: 300 + i };
+        const previous = state;
+        state = advanceMorphRect(state.rect, target, state.progress, i / 20);
+        assert.ok(state.rect.x > previous.rect.x);
+        assert.ok(state.rect.height > previous.rect.height);
+        assert.ok(state.progress > previous.progress);
+        if (i === 20) assert.deepEqual({ ...state.rect }, target);
+    }
+});
+
+test("page morph crops long rooms to the visible viewport in both directions", () => {
+    const { intersectMorphRect, visibleMorphTransform, morphClipInsets, advanceMorphRect } = load("components/layout/morph-motion.ts");
+    const screen = { x: 0, y: 0, width: 1200, height: 800 };
+    const room = { x: 250, y: 100, width: 896, height: 6000 };
+    const visible = intersectMorphRect(room, screen);
+    assert.deepEqual({ ...visible }, { x: 250, y: 100, width: 896, height: 700 });
+    assert.deepEqual(Array.from(morphClipInsets(room, visible)), [0, 0, 5300, 0]);
+    const card = { x: 250, y: 240, width: 432, height: 180 };
+    const opening = advanceMorphRect(card, visible, 0, 0.5).rect;
+    const closing = advanceMorphRect(visible, card, 0, 0.5).rect;
+    assert.equal(opening.height, 440);
+    assert.equal(closing.height, 440);
+    const scrolled = { ...room, y: -300 };
+    const scrolledVisible = intersectMorphRect(scrolled, screen);
+    assert.deepEqual({ ...scrolledVisible }, { x: 250, y: 0, width: 896, height: 800 });
+    assert.deepEqual(Array.from(morphClipInsets(scrolled, scrolledVisible)), [300, 0, 4900, 0]);
+    const transform = visibleMorphTransform(scrolled, scrolledVisible, card);
+    assert.equal(scrolled.x + transform.dx + (scrolledVisible.x - scrolled.x) * transform.sx, card.x);
+    assert.equal(scrolled.y + transform.dy + (scrolledVisible.y - scrolled.y) * transform.sy, card.y);
+    assert.equal(scrolledVisible.height * transform.sy, card.height);
+    assert.equal(intersectMorphRect({ ...card, y: 1000 }, screen).height, 0);
+});
+
+test("visible morph handoff is identity even when the full destination extends offscreen", () => {
+    const { intersectMorphRect, visibleMorphTransform, morphClipInsets } = load("components/layout/morph-motion.ts");
+    const full = { x: -20, y: -300, width: 1000, height: 6000 };
+    const screen = { x: 0, y: 0, width: 800, height: 700 };
+    const visible = intersectMorphRect(full, screen);
+    assert.deepEqual({ ...visible }, screen);
+    assert.deepEqual({ ...visibleMorphTransform(full, visible, visible) }, { sx: 1, sy: 1, dx: 0, dy: 0 });
+    assert.deepEqual(Array.from(morphClipInsets(full, visible)), [300, 180, 5000, 20]);
 });

@@ -1,11 +1,12 @@
 "use client";
 
+import { useRef } from "react";
 import ProgressSignal from "./ProgressSignal";
 import { useRouter } from "next/navigation";
 import Button from "../ui/Button";
 import Header from "./Header";
 
-type AuthShellProps = {
+type ShellProps = {
     title?: string;
     children?: React.ReactNode;
     className?: string;
@@ -14,10 +15,10 @@ type AuthShellProps = {
     animateAppear?: boolean;
     showBackButton?: boolean;
     backLink?: string;
+    back?: string;
     onBackClicked?: () => void;
     showHeader?: boolean;
-    sidebar?: React.ReactNode;
-    header?: React.ReactNode;
+    morphTarget?: boolean | string;
 };
 
 export default function Shell({
@@ -29,76 +30,74 @@ export default function Shell({
     animateAppear = false,
     showBackButton = false,
     backLink,
+    back,
     onBackClicked,
     showHeader = true,
-    sidebar,
-    header,
-}: AuthShellProps) {
+    morphTarget = false,
+}: ShellProps) {
     const router = useRouter();
+    const morphRef = useRef<HTMLDivElement>(null);
+    const backHref = back ?? backLink;
 
     if (loading) return <ProgressSignal />;
 
-    const content = (
-        <div className="flex flex-col items-center w-full">
-            {title && (
-                <div
-                    className={`relative mb-8 flex items-center ${showBackButton && "max-w-[calc(100vw-32px)]"} px-8`}
-                >
-                    {(showBackButton || backLink) && (
-                        <Button
-                            variant="text"
-                            iconName="arrowLeft"
-                            padding="small"
-                            href={backLink ?? undefined}
-                            onClick={
-                                !backLink
-                                    ? onBackClicked
-                                        ? onBackClicked
-                                        : () => {
-                                              router.back();
-                                          }
-                                    : undefined
-                            }
-                        />
-                    )}
-                    <h1
-                        className="w-fit max-w-full text-2xl font-bold font-mono"
-                        data-cursor="text"
-                    >
-                        {title}
-                    </h1>
-                </div>
-            )}
-
-            <div
-                className={`pb-[50vh] ${
-                    size == "small"
-                        ? "max-w-xs"
-                        : size === "medium"
-                          ? "max-w-md"
-                          : size === "large"
-                            ? "max-w-2xl"
-                            : "max-w-4xl"
-                } w-full ${className} ${
-                    animateAppear && "animate-appear origin-top"
-                }`}
-            >
-                {children}
-            </div>
-        </div>
-    );
+    const sizeClass = size === "small" ? "max-w-xs" : size === "medium"
+        ? "max-w-md" : size === "large" ? "max-w-2xl" : "max-w-4xl";
 
     return (
         <>
-            {showHeader && <Header>{header}</Header>}
-            {sidebar ? (
-                <div className="flex w-full flex-col sm:flex-row gap-12 sm:gap-0">
-                    {sidebar}
-                    {content}
+            {showHeader && <Header />}
+            <div className="flex flex-col items-center w-full">
+                <div
+                    ref={morphRef}
+                    data-navigation-morph-target={typeof morphTarget === "string" ? morphTarget : morphTarget ? "" : undefined}
+                    className={morphTarget ? `flex w-full flex-col items-center ${sizeClass}` : "contents"}
+                >
+                {title && (
+                    <div
+                        className={`relative mb-8 flex items-center ${(showBackButton || backHref) && "max-w-[calc(100vw-32px)]"} px-8`}
+                    >
+                        {(showBackButton || backHref) && (
+                            <Button
+                                variant="text"
+                                aria-label="戻る"
+                                iconName="arrowLeft"
+                                padding="small"
+                                href={backHref}
+                                navigation={back ? "pop" : undefined}
+                                navigationTransition={morphTarget ? "morph" : "slide"}
+                                navigationMorphSource={morphTarget ? morphRef : undefined}
+                                onClick={
+                                    !backHref
+                                        ? onBackClicked
+                                            ? onBackClicked
+                                            : () => {
+                                                  router.back();
+                                              }
+                                        : undefined
+                                }
+                            />
+                        )}
+                        <h1
+                            className="w-fit max-w-full text-2xl font-bold font-mono"
+                            data-cursor="text"
+                        >
+                            {title}
+                        </h1>
+                    </div>
+                )}
+
+                <div
+                    data-navigation-shell-width
+                    className={`${morphTarget ? "" : "pb-[50vh]"} ${sizeClass} w-full ${className} ${
+                        animateAppear && "animate-appear origin-top"
+                    }`}
+                >
+                    {children}
                 </div>
-            ) : (
-                content
-            )}
+                </div>
+                {morphTarget && <div className="w-full h-[50vh] shrink-0" aria-hidden="true" />}
+            </div>
         </>
     );
 }

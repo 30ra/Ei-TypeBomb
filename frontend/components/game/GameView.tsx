@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import SlideTransition from "@/components/layout/SlideTransition";
+import { getQuestionSlideDistance } from "@/components/game/question-slide-distance";
 import type { ReactNode, Ref } from "react";
 import ItemView from "@/components/recall/ItemView";
 import UsersView from "@/components/game/UsersView";
@@ -12,7 +14,10 @@ import type {
     RecallObservation,
     RecallProgress,
 } from "@/lib/playground/memory";
-import type { AnswerMode } from "@/lib/answer-mode";
+import {
+    toLearningAnswerMode,
+    type OfflineAnswerMode,
+} from "@/lib/answer-mode";
 import { getRoomItems } from "@/lib/item";
 import GameNotice, { type GameNoticeProps } from "@/components/game/GameNotice";
 
@@ -25,6 +30,7 @@ type Props = {
     bombStatus: number;
     currentItem: Item | null;
     itemPresentationKey?: number | string;
+    slideQuestion?: boolean;
     bombs?: GameBomb[];
     loserIds?: string[];
     loserNames?: string[];
@@ -62,7 +68,7 @@ type Props = {
     stopRecommended?: boolean;
     soloMode?: boolean;
     isPaused?: boolean;
-    answerMode: AnswerMode;
+    answerMode: OfflineAnswerMode;
     onSelectionAnswer?: (
         correct: boolean,
         hadMistake: boolean,
@@ -82,6 +88,7 @@ export default function GameView({
     bombStatus,
     currentItem,
     itemPresentationKey = 0,
+    slideQuestion = false,
     bombs,
     loserIds,
     loserNames,
@@ -189,9 +196,86 @@ export default function GameView({
     ]);
 
     // A newly presented word should not inherit the previous word's shake.
-    useEffect(() => {
+    useLayoutEffect(() => {
         activeGameRef.current?.classList.remove("wrong-answer");
     }, [failureKey]);
+
+    // The slide viewport spans the game area on every screen size. Keep
+    // the resting question and progress bar constrained independently.
+    const fullWidthQuestion =
+        soloMode && isStarted && currentItem !== null && !!room && !serverError;
+    const questionContent =
+        currentItem === null ? null : (
+            <div
+                data-question-slide-content
+                className={`flex h-full ${fullWidthQuestion ? "px-4" : soloMode ? "" : "animate-appear"} items-center justify-center flex-col gap-2 w-full`}
+            >
+                {soloMode ? null : currentTurnUser?.id === userId ? (
+                    <div
+                        className="font-bold text-xl px-2 pt-1 pb-1 w-fit flex"
+                        data-cursor="text"
+                    >
+                        あなたの番です
+                    </div>
+                ) : currentTurnUser ? (
+                    <div
+                        className="font-bold text-xl px-2 pt-1 pb-1 w-fit flex"
+                        data-cursor="text"
+                    >
+                        {currentTurnUser.displayName + "の番です"}
+                    </div>
+                ) : null}
+                <ItemView
+                    key={`${currentItem.id}:${currentTurn}:${itemPresentationKey}`}
+                    item={currentItem}
+                    items={getRoomItems(room)}
+                    answerMode={
+                        soloMode ? answerMode : toLearningAnswerMode(answerMode)
+                    }
+                    allowSelectionHint={soloMode}
+                    onSelectionAnswer={(
+                        correct,
+                        hadMistake,
+                        responseMs,
+                        usedHint,
+                    ) => {
+                        if (userId !== currentTurnUser?.id) return;
+                        if (!correct) triggerFailAnimation();
+                        onSelectionAnswer?.(
+                            correct,
+                            hadMistake,
+                            responseMs,
+                            usedHint,
+                        );
+                    }}
+                    remoteHintLength={remoteHintLength}
+                    onHintChange={onHintChange}
+                    hasDuplicatePrompt={hasDuplicatePrompt}
+                    bombStatus={bombStatus}
+                    onSuccess={onSuccess}
+                    onChangeInput={(input, failed) => {
+                        if (userId !== currentTurnUser?.id) return;
+                        if (failed) triggerFailAnimation();
+                        onChangeInput(input, failed);
+                    }}
+                    currentInput={
+                        result !== null
+                            ? ""
+                            : userId === currentTurnUser?.id && !isReconnecting
+                              ? null
+                              : currentInput
+                    }
+                    enableRemoteTypingSync={enableRemoteTypingSync}
+                    learningMode={learningMode}
+                    initialCueRatio={initialCueRatio}
+                    cueSteps={cueSteps}
+                    hintDelaysMs={hintDelaysMs}
+                    onRecallProgress={onRecallProgress}
+                    onRecallComplete={onRecallComplete}
+                    isPaused={isPaused}
+                />
+            </div>
+        );
 
     const activeGame =
         currentItem === null ? (
@@ -203,7 +287,6 @@ export default function GameView({
             </div>
         ) : (
             <div
-                key={soloMode ? itemPresentationKey : undefined}
                 ref={activeGameRef}
                 className="flex h-full items-center justify-center flex-col gap-2 w-full"
                 onAnimationEnd={(event) => {
@@ -214,72 +297,25 @@ export default function GameView({
                         event.currentTarget.classList.remove("wrong-answer");
                 }}
             >
-                {masteryProgress}
-                <div className="flex h-full animate-appear items-center justify-center flex-col gap-2 w-full">
-                    {soloMode ? null : currentTurnUser?.id === userId ? (
-                        <div
-                            className="font-bold text-xl px-2 pt-1 pb-1 w-fit flex"
-                            data-cursor="text"
-                        >
-                            あなたの番です
-                        </div>
-                    ) : currentTurnUser ? (
-                        <div
-                            className="font-bold text-xl px-2 pt-1 pb-1 w-fit flex"
-                            data-cursor="text"
-                        >
-                            {currentTurnUser.displayName + "の番です"}
-                        </div>
-                    ) : null}
-                    <ItemView
-                        key={`${currentItem.id}:${currentTurn}:${itemPresentationKey}`}
-                        item={currentItem}
-                        items={getRoomItems(room)}
-                        answerMode={answerMode}
-                        allowSelectionHint={soloMode}
-                        onSelectionAnswer={(
-                            correct,
-                            hadMistake,
-                            responseMs,
-                            usedHint,
-                        ) => {
-                            if (userId !== currentTurnUser?.id) return;
-                            if (!correct) triggerFailAnimation();
-                            onSelectionAnswer?.(
-                                correct,
-                                hadMistake,
-                                responseMs,
-                                usedHint,
-                            );
-                        }}
-                        remoteHintLength={remoteHintLength}
-                        onHintChange={onHintChange}
-                        hasDuplicatePrompt={hasDuplicatePrompt}
-                        bombStatus={bombStatus}
-                        onSuccess={onSuccess}
-                        onChangeInput={(input, failed) => {
-                            if (userId !== currentTurnUser?.id) return;
-                            if (failed) triggerFailAnimation();
-                            onChangeInput(input, failed);
-                        }}
-                        currentInput={
-                            result !== null
-                                ? ""
-                                : userId === currentTurnUser?.id &&
-                                    !isReconnecting
-                                  ? null
-                                  : currentInput
-                        }
-                        enableRemoteTypingSync={enableRemoteTypingSync}
-                        learningMode={learningMode}
-                        initialCueRatio={initialCueRatio}
-                        cueSteps={cueSteps}
-                        hintDelaysMs={hintDelaysMs}
-                        onRecallProgress={onRecallProgress}
-                        onRecallComplete={onRecallComplete}
-                        isPaused={isPaused}
-                    />
-                </div>
+                {fullWidthQuestion && masteryProgress ? (
+                    <div className="w-full max-w-3xl px-4">
+                        {masteryProgress}
+                    </div>
+                ) : (
+                    masteryProgress
+                )}
+                {soloMode ? (
+                    <SlideTransition
+                        transitionKey={itemPresentationKey}
+                        enabled={slideQuestion && !isPaused}
+                        contentClassName="max-w-3xl"
+                        getDistance={getQuestionSlideDistance}
+                    >
+                        {questionContent}
+                    </SlideTransition>
+                ) : (
+                    questionContent
+                )}
             </div>
         );
 
@@ -360,7 +396,7 @@ export default function GameView({
             )}
 
             <div
-                className={`${soloMode ? "mx-auto" : "md:order-2"} max-w-3xl w-full px-4 gap-4 pb-4 pt-17 h-full justify-end flex flex-col`}
+                className={`${soloMode ? "mx-auto" : "md:order-2"} w-full ${fullWidthQuestion ? "" : "max-w-3xl px-4"} gap-4 pb-4 pt-17 h-full justify-end flex flex-col`}
             >
                 <div
                     inert={isReconnecting || isPaused}

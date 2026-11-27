@@ -239,20 +239,18 @@ test("recovery proof is limited to the verified session and expires", async () =
     assert.equal(await exports.hasPasswordRecovery(session), false);
 });
 
+const readAccountRoute = (file) => readFileSync(
+    new URL("../app/(auth)/account/" + file, `file://${__filename}`),
+    "utf8",
+);
+
 test("settings link to password recovery and the reset page checks recovery state", () => {
-    const settings = readFileSync(
-        new URL("../components/account/settings/AccountSettings.tsx", `file://${__filename}`),
-        "utf8",
-    );
-    const security = readFileSync(
-        new URL("../components/account/settings/Security.tsx", `file://${__filename}`),
-        "utf8",
-    );
-    assert.match(settings, /label: "セキュリティ", icon: "shield"/);
-    assert.match(settings, /title=\{title\}/);
-    assert.match(security, /label: "メールアドレス"/);
-    assert.match(security, /label: "パスワード"/);
-    assert.match(security, /mode=\{screen === "password" \? "password-link" : "email"\}/);
+    const password = readAccountRoute("security/password/page.tsx");
+    const email = readAccountRoute("security/email/page.tsx");
+    assert.match(password, /<AuthForm mode="password-link"/);
+    assert.match(email, /<AuthForm mode="email"/);
+    for (const page of [password, email])
+        assert.match(page, /backLink="\/account\/security"/);
     const resetPage = readFileSync(
         new URL("../app/(auth)/sign-in/reset-password/page.tsx", `file://${__filename}`),
         "utf8",
@@ -261,19 +259,12 @@ test("settings link to password recovery and the reset page checks recovery stat
     assert.match(resetPage, /await hasPasswordRecovery/);
 });
 
-test("settings show apps to all users and group email/password under security", () => {
-    const page = readFileSync(
-        new URL("../app/(auth)/account/page.tsx", `file://${__filename}`),
-        "utf8",
-    );
-    const settings = readFileSync(
-        new URL("../components/account/settings/AccountSettings.tsx", `file://${__filename}`),
-        "utf8",
-    );
-    const security = readFileSync(
-        new URL("../components/account/settings/Security.tsx", `file://${__filename}`),
-        "utf8",
-    );
+test("account layout preserves apps, security, sign-out and protected nested settings", () => {
+    const page = readAccountRoute("page.tsx");
+    const layout = readAccountRoute("layout.tsx");
+    const security = readAccountRoute("security/page.tsx");
+    const accountPage = readAccountRoute("AccountPage.tsx");
+    const requireUser = readAccountRoute("require-account-user.ts");
     const apps = readFileSync(
         new URL("../components/account/settings/Apps.tsx", `file://${__filename}`),
         "utf8",
@@ -282,17 +273,15 @@ test("settings show apps to all users and group email/password under security", 
         new URL("../components/ui/Icon.tsx", `file://${__filename}`),
         "utf8",
     );
-    assert.match(page, /<AccountSettings user=\{user\}/);
-    assert.doesNotMatch(page, /mcpEnabled|ETB_MCP_OAUTH_ENABLED/);
-    assert.match(settings, /key: "apps", label: "アプリ"/);
-    assert.match(settings, /key: "security", label: "セキュリティ", icon: "shield"/);
-    assert.match(settings, /section === "apps" \? \(/);
-    assert.match(security, /key: "email", label: "メールアドレス"/);
-    assert.match(security, /key: "password", label: "パスワード"/);
-    assert.match(settings, /showBackButton=\{section === "security" && securityScreen !== "overview"\}/);
-    assert.match(settings, /onBackClicked=\{\(\) => setSecurityScreen\("overview"\)\}/);
-    assert.doesNotMatch(security, /セキュリティへ戻る/);
-    assert.doesNotMatch(security, /iconName="arrowLeft"/);
+    assert.match(page, /<Apps \/>/);
+    assert.doesNotMatch(page + layout, /mcpEnabled|ETB_MCP_OAUTH_ENABLED/);
+    assert.match(layout, /label: "アプリ", iconName: "layoutGrid", href: "\/account"/);
+    assert.match(layout, /label: "セキュリティ", iconName: "shield", href: "\/account\/security"/);
+    assert.match(layout, /<Sidebar items=\{items\} actions=\{<AccountSignOut user=\{user\}/);
+    assert.match(security, /href="\/account\/security\/email"/);
+    assert.match(security, /href="\/account\/security\/password"/);
+    assert.match(accountPage, /await requireAccountUser\(\)/);
+    assert.match(requireUser, /if \(!user\) redirect\("\/sign-in"\)/);
     assert.match(apps, /listAuthorizedApps/);
     assert.match(icon, /shield: Shield/);
 });
@@ -320,4 +309,64 @@ test("apps show an empty state rather than an error when MCP is disabled", async
     });
     const result = await exports.listAuthorizedApps();
     assert.deepEqual(JSON.parse(JSON.stringify(result)), { apps: [], error: null });
+});
+
+test("only nested security links opt into directional navigation", () => {
+    const security = readAccountRoute("security/page.tsx");
+    const layout = readAccountRoute("layout.tsx");
+    const accountPage = readAccountRoute("AccountPage.tsx");
+    const sidebar = readFileSync(
+        new URL("../components/layout/Sidebar.tsx", `file://${__filename}`), "utf8",
+    );
+    const shell = readFileSync(
+        new URL("../components/layout/Shell.tsx", `file://${__filename}`), "utf8",
+    );
+    assert.match(security, /href="\/account\/security\/email" navigation="push"/);
+    assert.match(security, /href="\/account\/security\/password" navigation="push"/);
+    assert.match(layout, /<Navigation>\{children\}<\/Navigation>/);
+    assert.match(accountPage, /back=\{backLink\}/);
+    assert.match(shell, /navigation=\{back \? "pop" : undefined\}/);
+    assert.doesNotMatch(sidebar, /navigation="(?:push|pop)"/);
+});
+
+test("navigation distance follows responsive Shell width without narrowing its viewport", () => {
+    const readLayout = (file) => readFileSync(
+        new URL("../components/layout/" + file, `file://${__filename}`), "utf8",
+    );
+    const shell = readLayout("Shell.tsx");
+    const navigation = readLayout("Navigation.tsx");
+    const css = readLayout("navigation.css");
+    assert.match(shell, /data-navigation-shell-width\s+className=/);
+    assert.match(navigation, /shell\?\.offsetWidth \|\| viewport\.clientWidth/);
+    assert.match(navigation, /min-w-0 w-full overflow-x-clip/);
+    assert.match(navigation, /slideFrames\(request\.direction === "push" \? "push-in" : "under-in", width, offset\)/);
+    assert.match(css, /translateX\(var\(--etb-navigation-new-width, 100%\)\)/);
+    assert.match(css, /translateX\(var\(--etb-navigation-old-width, 100%\)\)/);
+    assert.match(css, /calc\(\s*var\(--etb-navigation-old-width, 100%\)\s*\*\s*var\(--etb-slide-offset\)\s*\*\s*-1\s*\)/);
+    assert.match(css, /calc\(\s*var\(--etb-navigation-new-width, 100%\)\s*\*\s*var\(--etb-slide-offset\)\s*\*\s*-1\s*\)/);
+});
+
+test("native navigation keeps the cursor separate and refreshes on destination commit", () => {
+    const readLayout = file => readFileSync(new URL("../components/layout/" + file, `file://${__filename}`), "utf8");
+    const navigation = readLayout("Navigation.tsx");
+    const css = readLayout("navigation.css");
+    assert.match(navigation, /if \(matches && request\.transition\) beginNativeSlideCursor\(\);\s*stop\(request, !matches\)/);
+    assert.match(navigation, /endNativeSlideCursor\(\)/);
+    assert.match(css, /view-transition-name: etb-navigation-cursor/);
+    assert.match(css, /::view-transition-old\(etb-navigation-cursor\) \{\s*display: none/);
+});
+
+test("root navigation preserves the full-height game layout and anchors game settings", () => {
+    const read = file => readFileSync(new URL("../" + file, "file://" + __filename), "utf8");
+    const nav = read("components/layout/Navigation.tsx");
+    const root = read("app/layout.tsx");
+    const game = read("components/game/GameView.tsx");
+    assert.match(root, /<main className="[^"]*\bh-dvh\b[^"]*">\s*<Navigation root>/);
+    assert.ok(nav.includes('root ? "h-full min-h-0 shrink-0" : ""'));
+    assert.match(nav, /<div ref=\{content\} className=\{root \? "h-full" : undefined\}>/);
+    assert.match(game, /w-full h-full\x60\}/);
+    for (const mode of ["offline", "online"]) {
+        const client = read("app/(game)/[link]/" + mode + "/Client.tsx");
+        assert.match(client, /<header className="absolute top-0 right-0 flex justify-end p-4 gap-4">/);
+    }
 });

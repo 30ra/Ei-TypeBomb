@@ -1,15 +1,16 @@
 "use client";
 
-import React from "react";
+import React, { useRef } from "react";
 import { IconName } from "./Icon";
 import { Icon } from "./Icon";
 import Link from "next/link";
+import { useNavigation, type NavigationDirection, type NavigationTransition } from "../layout/Navigation";
 
 type ButtonVariant = "default" | "primary" | "text" | "danger";
 
 type ButtonProps = Pick<
     React.ButtonHTMLAttributes<HTMLButtonElement>,
-    "aria-haspopup" | "aria-expanded" | "aria-controls" | "aria-label"
+    "aria-haspopup" | "aria-expanded" | "aria-controls" | "aria-label" | "aria-current"
 > & {
     children?: React.ReactNode;
     onClick?: React.MouseEventHandler<HTMLButtonElement>;
@@ -30,6 +31,10 @@ type ButtonProps = Pick<
     cursor?: "0" | "1" | "2";
     href?: string;
     prefetch?: boolean;
+    navigation?: NavigationDirection;
+    navigationScope?: "local" | "root";
+    navigationTransition?: NavigationTransition;
+    navigationMorphSource?: React.RefObject<HTMLElement | null>;
     font?: "default" | "mono" | "serif";
 };
 
@@ -70,9 +75,15 @@ export default function Button({
     cursor = disabled || loading ? "2" : variant === "text" ? "1" : "0",
     href,
     prefetch,
+    navigation,
+    navigationScope = "local",
+    navigationTransition = "slide",
+    navigationMorphSource,
     font,
     ...ariaProps
 }: ButtonProps) {
+    const navigate = useNavigation(navigationScope);
+    const linkRef = useRef<HTMLAnchorElement>(null);
     const currentVariantStyle = variantStyles(variant, loading, disabled);
     const paddingStyle =
         variant === "text" && padding === "xsmall"
@@ -93,8 +104,19 @@ export default function Button({
                 data-cursor-shape={cursor}
             >
                 <Link
+                    ref={linkRef}
                     href={href}
                     prefetch={prefetch}
+                    onNavigate={(event) => {
+                        if (navigation && !disabled && !loading) {
+                            const source = navigationMorphSource?.current ?? linkRef.current;
+                            navigate?.(href, navigation, event.preventDefault,
+                                navigationTransition === "morph" && source
+                                    ? { transition: "morph", source }
+                                    : undefined,
+                            );
+                        }
+                    }}
                     {...ariaProps}
                     type={type}
                     className={`${baseStyles} ${currentVariantStyle} ${paddingStyle} ${fontStyle} ${disabled && "opacity-50 pointer-events-none"} ${alignment === "left" ? "justify-start" : "justify-center"}`}
