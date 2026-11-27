@@ -14,7 +14,13 @@ fn main() {
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(site))
                 .title("Ei-TypeBomb")
                 .inner_size(1120.0, 780.0)
-                .on_navigation(move |url| url.origin() == allowed_origin)
+                .on_navigation(move |url| {
+                    url.origin() == allowed_origin
+                        || matches!(url.as_str(), "about:blank" | "about:srcdoc")
+                        || (url.scheme() == "https"
+                            && url.host_str() == Some("challenges.cloudflare.com")
+                            && url.port().is_none())
+                })
                 .on_new_window(|_, _| NewWindowResponse::Deny)
                 .build()?;
 
