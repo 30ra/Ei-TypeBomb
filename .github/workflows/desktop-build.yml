@@ -15,6 +15,14 @@ jobs:
             target: x86_64-pc-windows-msvc
             bundle: nsis
             extension: exe
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            bundle: nsis
+            extension: exe
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            bundle: deb
+            extension: deb
           - os: macos-latest
             target: universal-apple-darwin
             bundle: dmg
@@ -30,6 +38,8 @@ jobs:
           node-version: 22
       - run: rustup update stable
       - run: rustup default stable
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev
       - if: runner.os == 'macOS'
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
       - run: npx --yes --package @tauri-apps/cli@2 tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundle }} -- --locked
@@ -37,4 +47,44 @@ jobs:
         with:
           name: Ei-TypeBomb-${{ matrix.target }}
           path: desktop/src-tauri/target/${{ matrix.target }}/release/bundle/${{ matrix.bundle }}/*.${{ matrix.extension }}
+          if-no-files-found: error
+  riscv64:
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cross compiler and target libraries
+        run: |
+          dpkg --add-architecture riscv64
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl build-essential pkg-config gcc-riscv64-linux-gnu libc6-dev-riscv64-cross libwebkit2gtk-4.1-dev:riscv64 file
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs -o /tmp/install-rust.sh
+          sh /tmp/install-rust.sh -y --profile minimal --target riscv64gc-unknown-linux-gnu
+      - name: Compile and package for Debian riscv64
+        shell: bash
+        env:
+          CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER: riscv64-linux-gnu-gcc
+          CC_riscv64gc_unknown_linux_gnu: riscv64-linux-gnu-gcc
+          PKG_CONFIG_LIBDIR_riscv64gc_unknown_linux_gnu: /usr/lib/riscv64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+          PKG_CONFIG_ALLOW_CROSS: 1
+        run: |
+          set -eu
+          source "$HOME/.cargo/env"
+          cd desktop/src-tauri
+          cargo build --release --locked --target riscv64gc-unknown-linux-gnu --features tauri/custom-protocol
+          binary=target/riscv64gc-unknown-linux-gnu/release/ei-typebomb-desktop
+          file "$binary" | grep -i 'RISC-V'
+          pkg=$(mktemp -d)
+          install -Dm755 "$binary" "$pkg/usr/bin/ei-typebomb-desktop"
+          install -Dm644 icons/icon.png "$pkg/usr/share/icons/hicolor/1024x1024/apps/ei-typebomb-desktop.png"
+          install -Dm644 ../../LICENSE "$pkg/usr/share/doc/ei-type-bomb/copyright"
+          mkdir -p "$pkg/DEBIAN" "$pkg/usr/share/applications"
+          printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=Ei-TypeBomb' 'Exec=ei-typebomb-desktop' 'Icon=ei-typebomb-desktop' 'Categories=Game;' > "$pkg/usr/share/applications/Ei-TypeBomb.desktop"
+          version=$(sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml | head -1)
+          printf '%s\n' 'Package: ei-type-bomb' "Version: $version" 'Architecture: riscv64' 'Maintainer: Ei-TypeBomb Desktop contributors' 'Depends: libwebkit2gtk-4.1-0, libgtk-3-0t64' 'Description: Ei-TypeBomb desktop typing game' > "$pkg/DEBIAN/control"
+          dpkg-deb --root-owner-group --build "$pkg" "Ei-TypeBomb_${version}_riscv64.deb"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Ei-TypeBomb-riscv64-linux
+          path: desktop/src-tauri/*_riscv64.deb
           if-no-files-found: error
